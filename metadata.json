@@ -1,0 +1,6 @@
+{
+  "name": "CodeForge Uni",
+  "description": "Plataforma gamificada de ensino de programação com Inteligência Artificial que leva estudantes do zero absoluto ao nível intermediário universitário com rigor técnico e método socrático.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
