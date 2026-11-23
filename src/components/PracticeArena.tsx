@@ -96,9 +96,13 @@ export function PracticeArena({
   const [selectedBug, setSelectedBug] = useState<DebugChallenge>(DEBUG_CHALLENGES[0]);
   const [bugCodeByKey, setBugCodeByKey] = useState<Record<string, string>>({});
 
+  const experienceLevel = profile.experienceLevel ?? profile.initialLevel;
+
   // AI Challenge Forge state
   const [topic, setTopic] = useState(TOPICS[0]);
-  const [difficulty, setDifficulty] = useState<'iniciante' | 'intermediario' | 'universitario'>('intermediario');
+  const [difficulty, setDifficulty] = useState<'iniciante' | 'intermediario' | 'universitario'>(
+    experienceLevel === 'intermediario' ? 'intermediario' : 'iniciante'
+  );
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
   const [aiChallenge, setAiChallenge] = useState<GeneratedChallenge | null>(null);
@@ -468,6 +472,7 @@ export function PracticeArena({
                 testCases={selectedBug.testCases}
                 careerTrack={profile.careerTrack}
                 programmingLanguage={activeLang}
+                experienceLevel={experienceLevel}
                 studentName={profile.name}
                 mobileSection={mobilePane === 'output' ? 'output' : 'editor'}
                 forceMobile={forceMobile}
@@ -608,6 +613,7 @@ export function PracticeArena({
                     testCases={aiChallenge.testes}
                     careerTrack={profile.careerTrack}
                     programmingLanguage={activeLang}
+                    experienceLevel={experienceLevel}
                     studentName={profile.name}
                     mobileSection={mobilePane === 'output' ? 'output' : 'editor'}
                     forceMobile={forceMobile}
@@ -780,6 +786,7 @@ export function PracticeArena({
                 testCases={selectedExam.testCases}
                 careerTrack={profile.careerTrack}
                 programmingLanguage={activeLang}
+                experienceLevel={experienceLevel}
                 studentName={profile.name}
                 examMode={true}
                 mobileSection={mobilePane === 'output' ? 'output' : 'editor'}
@@ -1074,6 +1081,7 @@ export function PracticeArena({
                 testCases={activeStep.testCases}
                 careerTrack={profile.careerTrack}
                 programmingLanguage={activeLang}
+                experienceLevel={experienceLevel}
                 studentName={profile.name}
                 mobileSection={mobilePane === 'output' ? 'output' : 'editor'}
                 forceMobile={forceMobile}

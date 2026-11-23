@@ -1,6 +1,14 @@
 export type CareerTrackId = 'explorador' | 'jogos' | 'web' | 'dados' | 'sistemas';
 
-export type InitialLevel = 'zero' | 'basico';
+export type InitialLevel = 'zero' | 'basico' | 'intermediario';
+
+export type LessonDifficultyTag =
+  | 'Bem fácil'
+  | 'Fácil'
+  | 'Fácil → Médio'
+  | 'Médio'
+  | 'Intermediário'
+  | 'Universitário';
 
 export type ProgrammingLanguage = 'javascript' | 'python' | 'java' | 'csharp' | 'cpp';
 
@@ -26,6 +34,7 @@ export interface StudentProfile {
   name: string;
   goal: string;
   initialLevel: InitialLevel;
+  experienceLevel?: InitialLevel;
   careerTrack: CareerTrackId;
   programmingLanguage: ProgrammingLanguage;
   onboardingComplete: boolean;
@@ -58,6 +67,12 @@ export interface ConceptQuiz {
   explanation: string;
 }
 
+export interface SimilarExample {
+  title: string;
+  explanation: string;
+  codeByLanguage: Record<ProgrammingLanguage, string>;
+}
+
 export interface Lesson {
   id: string;
   moduleId: string;
@@ -67,11 +82,15 @@ export interface Lesson {
   estimatedMinutes: number;
   xpReward: number;
   universityTag: string;
+  difficultyTag?: LessonDifficultyTag;
   theoryBlocks: {
     heading: string;
     body: string;
     codeExample?: string;
   }[];
+  similarExample?: SimilarExample;
+  progressiveHints: [string, string, string];
+  progressiveHintTemplateByLanguage?: Partial<Record<ProgrammingLanguage, string>>;
   trackContext: Record<CareerTrackId, string>;
   conceptQuiz: ConceptQuiz;
   challenge: {

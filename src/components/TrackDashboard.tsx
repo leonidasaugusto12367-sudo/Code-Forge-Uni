@@ -108,7 +108,9 @@ export function TrackDashboard({
             <h1 className="text-2xl sm:text-4xl font-bold text-white leading-tight max-w-2xl">
               {showCompletedHero
                 ? `Parabéns, ${profile.name}! Você zerou a trilha universitária.`
-                : `Olá, ${profile.name}. Vamos avançar na sua preparação universitária.`}
+                : (profile.experienceLevel ?? profile.initialLevel) === 'zero' && completedCount < 3
+                  ? `Olá, ${profile.name}. Vamos dar seus primeiros passos no código.`
+                  : `Olá, ${profile.name}. Vamos avançar na sua preparação universitária.`}
             </h1>
 
             {showCompletedHero ? (
@@ -249,7 +251,7 @@ export function TrackDashboard({
           <div>
             <h2 className="text-2xl font-bold text-white">Currículo Progressivo</h2>
             <p className="text-sm text-slate-400 mt-1">
-              6 módulos do zero absoluto às estruturas de dados cobradas nos primeiros semestres da faculdade.
+              6 módulos guiados: começa no nível zero absoluto (bem fácil) e evolui aos poucos até o nível universitário.
             </p>
           </div>
           <p className="text-xs text-slate-400 tabular-nums">
@@ -309,7 +311,7 @@ export function TrackDashboard({
                         }`}
                       >
                         <div className="min-w-0 space-y-1">
-                          <div className="flex items-center gap-2 text-xs">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
                             {isDone ? (
                               <span className="inline-flex items-center gap-1 text-emerald-400 font-medium">
                                 <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
@@ -319,6 +321,22 @@ export function TrackDashboard({
                               <span className="text-cyan-300 font-medium">Próxima recomendada</span>
                             ) : (
                               <span className="text-slate-400">Aula {lesson.order}</span>
+                            )}
+                            {lesson.difficultyTag && (
+                              <>
+                                <span aria-hidden="true" className="text-slate-600">·</span>
+                                <span
+                                  className={
+                                    lesson.difficultyTag === 'Bem fácil' || lesson.difficultyTag === 'Fácil'
+                                      ? 'text-emerald-300 font-medium'
+                                      : lesson.difficultyTag === 'Fácil → Médio' || lesson.difficultyTag === 'Médio'
+                                        ? 'text-amber-300 font-medium'
+                                        : 'text-purple-300 font-medium'
+                                  }
+                                >
+                                  {lesson.difficultyTag}
+                                </span>
+                              </>
                             )}
                             <span aria-hidden="true" className="text-slate-600">·</span>
                             <span className="text-slate-400 tabular-nums">{lesson.estimatedMinutes} min</span>

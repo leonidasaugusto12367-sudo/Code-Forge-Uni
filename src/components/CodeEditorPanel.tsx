@@ -7,12 +7,15 @@ import {
   Flag,
   HelpCircle,
   Keyboard,
+  Lightbulb,
   Loader2,
   Play,
   RotateCcw,
   Send,
   ShieldAlert,
+  Square,
   Terminal,
+  Volume2,
   XCircle,
 } from 'lucide-react';
 import {
@@ -25,11 +28,17 @@ import {
   CareerTrackId,
   CodeReviewResponse,
   CodeRunResult,
+  InitialLevel,
   ProgrammingLanguage,
   SocraticHintResponse,
   TestCase,
 } from '../types';
 import { runJavaScriptChallengeAsync } from '../utils/codeRunner';
+import {
+  primeSpeechOnUserGesture,
+  stopSpeech,
+  useVoiceProfessor,
+} from '../utils/voiceProfessor';
 
 interface CodeEditorPanelProps {
   challengeTitle: string;
@@ -42,6 +51,11 @@ interface CodeEditorPanelProps {
   careerTrack: CareerTrackId;
   programmingLanguage: ProgrammingLanguage;
   studentName: string;
+  experienceLevel?: InitialLevel;
+  moduleId?: string;
+  lessonOrder?: number;
+  progressiveHints?: [string, string, string];
+  progressiveHintTemplate?: string;
   examMode?: boolean;
   mobileSection?: 'all' | 'editor' | 'output';
   forceMobile?: boolean;
@@ -99,6 +113,120 @@ function formatValue(val: unknown): string {
   }
 }
 
+interface LocalPedagogicalHint {
+  diagnostico: string;
+  pergunta: string;
+  proximoPasso: string;
+}
+
+function buildLocalPedagogicalHint(params: {
+  code: string;
+  starterCode: string;
+  functionName: string;
+  runResult: CodeRunResult | null;
+  langName: string;
+  consoleCommand: string;
+}): LocalPedagogicalHint {
+  const { code, starterCode, functionName, runResult, langName, consoleCommand } = params;
+  const trimmedCode = code.trim();
+
+  if (!trimmedCode || trimmedCode === starterCode.trim()) {
+    return {
+      diagnostico:
+        'Seu editor ainda está igual ao código inicial da aula. O primeiro passo é transformar as regras do enunciado em instruções dentro da função.',
+      pergunta: `Quais são as entradas que a função "${functionName}" recebe e o que ela precisa retornar em um caso simples?`,
+      proximoPasso:
+        'Comece tratando o caso mais simples ou o caso extremo (ex.: valor 0, negativo ou lista vazia) e clique em "Executar Testes".',
+    };
+  }
+
+  if (runResult?.compileError) {
+    return {
+      diagnostico: `Antes da lógica, existe um erro de sintaxe/execução em ${langName}: ${runResult.compileError}`,
+      pergunta:
+        'Todas as chaves { }, parênteses ( ), aspas e nomes de variáveis/função estão escritos e fechados corretamente na linha indicada?',
+      proximoPasso: `Corrija a linha apontada no erro de execução, confirme se a função "${functionName}" manteve a assinatura correta e execute os testes novamente.`,
+    };
+  }
+
+  const failedTests = runResult ? runResult.results.filter((r) => !r.passed) : [];
+  if (failedTests.length === 0) {
+    if (runResult && runResult.allPassed) {
+      return {
+        diagnostico: 'Todos os testes já passaram! Se quiser melhorar ainda mais, revise nomes de variáveis e casos extremos.',
+        pergunta: 'Seu código continuaria claro e seguro se recebesse entradas maiores ou valores inesperados?',
+        proximoPasso: 'Revise a legibilidade da solução e clique em "Tentar novamente" quando quiser o feedback da I.A.',
+      };
+    }
+
+    return {
+      diagnostico: `Ainda não há resultados de teste registrados em ${langName} para apontar exatamente qual caso divergiu.`,
+      pergunta: `Se você testar mentalmente a função "${functionName}" com a primeira entrada do enunciado, qual valor ela retorna linha por linha?`,
+      proximoPasso: `Clique em "Executar Testes" primeiro e use ${consoleCommand} para inspecionar os valores intermediários.`,
+    };
+  }
+
+  const firstFail = failedTests[0];
+  const expectedStr = formatValue(firstFail.expected);
+  const actualStr = firstFail.error ? `Erro: ${firstFail.error}` : formatValue(firstFail.actual);
+  const inputStr = firstFail.input.map(formatValue).join(', ');
+
+  if (firstFail.error) {
+    return {
+      diagnostico: `O teste "${firstFail.label}" (${functionName}(${inputStr})) disparou um erro em tempo de execução: ${firstFail.error}.`,
+      pergunta:
+        'Você está acessando algum índice fora do limite, variável indefinida ou operando em um tipo diferente do esperado?',
+      proximoPasso: `Adicione uma proteção antes dessa operação (ou imprima os valores com ${consoleCommand}) e reexecute os testes.`,
+    };
+  }
+
+  if (firstFail.actual === undefined || firstFail.actual === null) {
+    return {
+      diagnostico: `No teste "${firstFail.label}", sua função retornou ${actualStr}, mas o esperado era ${expectedStr}. Isso normalmente indica que faltou um comando "return" em algum caminho do código.`,
+      pergunta:
+        'Todos os caminhos (if / else e o final da função) devolvem explicitamente o resultado com return em vez de apenas imprimir no console?',
+      proximoPasso: `Confira se há um "return" devolvendo o resultado final calculado e rode "Executar Testes".`,
+    };
+  }
+
+  if (typeof firstFail.expected !== typeof firstFail.actual) {
+    return {
+      diagnostico: `Divergência de tipo no teste "${firstFail.label}": o esperado era ${expectedStr} (${typeof firstFail.expected}), mas seu código devolveu ${actualStr} (${typeof firstFail.actual}).`,
+      pergunta:
+        'Você retornou texto em vez de número (ou vice-versa), ou um objeto/lista com formato diferente do pedido no enunciado?',
+      proximoPasso: `Ajuste o tipo do valor retornado para corresponder exatamente a ${expectedStr} e valide novamente nos testes.`,
+    };
+  }
+
+  if (firstFail.isEdgeCase) {
+    return {
+      diagnostico: `Seu código falhou no caso extremo "${firstFail.label}": com entrada (${inputStr}), retornou ${actualStr} em vez de ${expectedStr}.`,
+      pergunta:
+        'O que acontece na sua condição ou laço quando a entrada é vazia, zero, negativa ou está exatamente na fronteira (< vs <=)?',
+      proximoPasso: `Trate esse caso extremo explicitamente logo no início da função ou revise os operadores de comparação e clique em "Executar Testes".`,
+    };
+  }
+
+  if (
+    typeof firstFail.expected === 'number' &&
+    typeof firstFail.actual === 'number' &&
+    Math.abs(firstFail.expected - firstFail.actual) === 1
+  ) {
+    return {
+      diagnostico: `Quase lá! No teste "${firstFail.label}" (${inputStr}), o retorno foi ${actualStr} e o esperado era ${expectedStr} (diferença de 1 — clássico erro de fronteira / off-by-one).`,
+      pergunta:
+        'Seu laço ou comparação deveria usar "<" ou "<=" (ou começar em 0 vs 1)?',
+      proximoPasso: `Inspecione os limites do laço/condição com ${consoleCommand} para verificar a primeira e a última iteração.`,
+    };
+  }
+
+  return {
+    diagnostico: `No teste "${firstFail.label}", para entrada (${inputStr}), sua função retornou ${actualStr}, mas o esperado era ${expectedStr} (${failedTests.length} teste(s) falhando no total).`,
+    pergunta: `Em qual linha o valor calculado dentro de "${functionName}" começa a divergir de ${expectedStr}?`,
+    proximoPasso: `Use ${consoleCommand} para observar as variáveis intermediárias com a entrada (${inputStr}) e ajuste a lógica passo a passo.`,
+  };
+}
+
 export function CodeEditorPanel({
   challengeTitle,
   challengePrompt,
@@ -110,6 +238,11 @@ export function CodeEditorPanel({
   careerTrack,
   programmingLanguage,
   studentName,
+  experienceLevel = 'zero',
+  moduleId,
+  lessonOrder,
+  progressiveHints,
+  progressiveHintTemplate,
   examMode = false,
   mobileSection = 'all',
   forceMobile = false,
@@ -128,6 +261,8 @@ export function CodeEditorPanel({
   const [runResult, setRunResult] = useState<CodeRunResult | null>(null);
   const [hintLoading, setHintLoading] = useState(false);
   const [hintError, setHintError] = useState<string | null>(null);
+  const [localFallbackHint, setLocalFallbackHint] = useState<LocalPedagogicalHint | null>(null);
+  const [progressiveHintLevel, setProgressiveHintLevel] = useState<0 | 1 | 2 | 3>(0);
   const [hintThread, setHintThread] = useState<HintThreadEntry[]>([]);
   const [hintReplyInput, setHintReplyInput] = useState('');
   const [lastFailedHintReply, setLastFailedHintReply] = useState<string | undefined>(undefined);
@@ -141,6 +276,12 @@ export function CodeEditorPanel({
   const aiPanelEndRef = useRef<HTMLDivElement | null>(null);
   const mountedRef = useRef(true);
   const runSeqRef = useRef(0);
+
+  const voice = useVoiceProfessor({ stopOnUnmount: true });
+  const firstName = useMemo(
+    () => studentName.trim().split(/\s+/)[0] || 'estudante',
+    [studentName]
+  );
 
   useEffect(() => {
     mountedRef.current = true;
@@ -163,10 +304,13 @@ export function CodeEditorPanel({
   const lineCount = useMemo(() => Math.max(12, code.split('\n').length), [code]);
 
   useEffect(() => {
-    if (activeOutputTab === 'ai' && (hintThread.length > 0 || hintLoading || hintError)) {
+    if (
+      activeOutputTab === 'ai' &&
+      (hintThread.length > 0 || hintLoading || hintError || progressiveHintLevel > 0)
+    ) {
       aiPanelEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
-  }, [activeOutputTab, hintThread.length, hintLoading, hintError]);
+  }, [activeOutputTab, hintThread.length, hintLoading, hintError, progressiveHintLevel]);
 
   const handleInsertSymbol = (sym: QuickSymbolItem) => {
     const el = textareaRef.current;
@@ -202,6 +346,7 @@ export function CodeEditorPanel({
 
   const handleRunTests = async () => {
     if (runLoading) return;
+    primeSpeechOnUserGesture();
     const seq = ++runSeqRef.current;
     setActiveOutputTab('tests');
     onRequestMobileOutputTab?.();
@@ -228,6 +373,28 @@ export function CodeEditorPanel({
           onExamSubmitted?.(true, examElapsedSeconds);
         }
         onAllTestsPassed?.();
+        if (voice.autoSpeak && voice.isSupported && !examMode) {
+          voice.speak(
+            `Parabéns, ${firstName}! Todos os ${res.results.length} testes passaram! Excelente trabalho, você já pode seguir para a próxima aula.`,
+            'test-run-feedback'
+          );
+        }
+      } else if (voice.autoSpeak && voice.isSupported && !examMode) {
+        if (res.compileError) {
+          voice.speak(
+            `Calma, ${firstName}, apareceu um pequeno erro de escrita no código. Veja a mensagem em vermelho na tela ou clique em Dica para eu te ajudar passo a passo.`,
+            'test-run-feedback'
+          );
+        } else if (res.results.length > 0) {
+          const passedNow = res.results.filter((r) => r.passed).length;
+          const remaining = res.results.length - passedNow;
+          voice.speak(
+            `Quase lá, ${firstName}! ${passedNow} de ${res.results.length} testes passaram. Falta ajustar ${
+              remaining === 1 ? 'apenas 1 teste' : `${remaining} testes`
+            }. Sem pressa, dê uma olhada no caso em vermelho ou clique em Dica para resolvermos juntos.`,
+            'test-run-feedback'
+          );
+        }
       }
     } catch (err) {
       if (!mountedRef.current || seq !== runSeqRef.current) return;
@@ -259,6 +426,7 @@ export function CodeEditorPanel({
   };
 
   const handleReset = () => {
+    stopSpeech();
     onCodeChange(starterCode);
     setRunResult(null);
     setHintThread([]);
@@ -266,6 +434,8 @@ export function CodeEditorPanel({
     setLastFailedHintReply(undefined);
     setReviewData(null);
     setHintError(null);
+    setLocalFallbackHint(null);
+    setProgressiveHintLevel(0);
     setReviewError(null);
     if (examMode) {
       setExamElapsedSeconds(0);
@@ -300,6 +470,7 @@ export function CodeEditorPanel({
 
   const handleAskHint = async (replyOverride?: string) => {
     if (hintLoading || examMode) return;
+    primeSpeechOnUserGesture();
 
     const rawReply = replyOverride !== undefined ? replyOverride : '';
     const trimmedReply = rawReply.trim();
@@ -307,6 +478,7 @@ export function CodeEditorPanel({
 
     setHintLoading(true);
     setHintError(null);
+    setLocalFallbackHint(null);
     setLastFailedHintReply(undefined);
     setActiveOutputTab('ai');
     onRequestMobileOutputTab?.();
@@ -343,6 +515,9 @@ export function CodeEditorPanel({
         failedTests,
         careerTrack,
         programmingLanguage,
+        experienceLevel,
+        moduleId,
+        lessonOrder,
         studentName,
         history: priorHistory,
         studentReply: isFollowUp ? trimmedReply : undefined,
@@ -350,6 +525,7 @@ export function CodeEditorPanel({
 
       if (!mountedRef.current) return;
 
+      const assistantEntryId = Date.now() + 1;
       const assistantSummary = `${hint.diagnosticoTecnico}\nPergunta socrática: ${hint.perguntaSocratica}\nPista: ${hint.pistaDirecionada}`;
       setHintThread((prev) => [
         ...prev,
@@ -364,13 +540,20 @@ export function CodeEditorPanel({
             ]
           : []),
         {
-          id: Date.now() + 1,
+          id: assistantEntryId,
           role: 'assistant',
           text: assistantSummary,
           hint,
         },
       ]);
       onHintUsed?.();
+
+      if (voice.autoSpeak && voice.isSupported) {
+        voice.speak(
+          `${hint.diagnosticoTecnico}. ${hint.perguntaSocratica}. Dica prática: ${hint.pistaDirecionada}. Próximo passo: ${hint.proximoPasso}`,
+          `ai-hint-${assistantEntryId}`
+        );
+      }
     } catch (err) {
       if (!mountedRef.current) return;
       if (isFollowUp && pendingUserId !== null) {
@@ -378,11 +561,46 @@ export function CodeEditorPanel({
         setHintReplyInput(rawReply);
         setLastFailedHintReply(rawReply);
       }
-      setHintError(err instanceof Error ? err.message : 'Erro ao consultar o Professor I.A.');
+      setHintError(err instanceof Error ? err.message : 'A I.A. não respondeu agora.');
+      const computedLocal = buildLocalPedagogicalHint({
+        code,
+        starterCode,
+        functionName,
+        runResult: latestRun,
+        langName: langMeta.name,
+        consoleCommand: langMeta.consoleCommand,
+      });
+      setLocalFallbackHint(computedLocal);
+      setProgressiveHintLevel((prev) => (prev === 0 ? 1 : prev));
+
+      if (voice.autoSpeak && voice.isSupported) {
+        const level1Text = progressiveHints?.[0] ?? computedLocal.diagnostico;
+        voice.speak(`Dica da aula: ${level1Text}`, 'progressive-hint');
+      }
     } finally {
       if (mountedRef.current) {
         setHintLoading(false);
       }
+    }
+  };
+
+  const handleOpenProgressiveHint = () => {
+    setActiveOutputTab('ai');
+    onRequestMobileOutputTab?.();
+    const computedLocal = buildLocalPedagogicalHint({
+      code,
+      starterCode,
+      functionName,
+      runResult,
+      langName: langMeta.name,
+      consoleCommand: langMeta.consoleCommand,
+    });
+    setLocalFallbackHint(computedLocal);
+    const nextLevel: 1 | 2 | 3 = progressiveHintLevel === 0 ? 1 : progressiveHintLevel;
+    setProgressiveHintLevel(nextLevel);
+    if (voice.autoSpeak && voice.isSupported) {
+      const spokenText = progressiveHints?.[nextLevel - 1] ?? computedLocal.diagnostico;
+      voice.speak(`Dica nível ${nextLevel}: ${spokenText}`, 'progressive-hint');
     }
   };
 
@@ -410,6 +628,9 @@ export function CodeEditorPanel({
         passedAllTests: Boolean(latestRun?.allPassed),
         careerTrack,
         programmingLanguage,
+        experienceLevel,
+        moduleId,
+        lessonOrder,
         studentName,
       });
       if (!mountedRef.current) return;
@@ -673,8 +894,8 @@ export function CodeEditorPanel({
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            {examMode ? 'Code Review Pós-Prova' : 'Professor I.A.'}
-            {(hintThread.length > 0 || reviewData) ? ' (Pronto)' : ''}
+            {examMode ? 'Code Review Pós-Prova' : 'Dicas & Professor I.A.'}
+            {(hintThread.length > 0 || reviewData || progressiveHintLevel > 0) ? ' (Pronto)' : ''}
           </button>
         )}
       </div>
@@ -852,8 +1073,34 @@ export function CodeEditorPanel({
                         className="p-4 rounded-xl bg-[#0B0F19] border border-cyan-500/25 space-y-3"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-cyan-300 font-medium">
-                          <span>Orientação Socrática · Professor Doutor I.A.</span>
-                          <span className="text-slate-400">{entry.hint.conceitoAcademico}</span>
+                          <span>Orientação Socrática · Professor I.A.</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-slate-400">{entry.hint.conceitoAcademico}</span>
+                            {voice.isSupported && (() => {
+                              const srcId = `ai-hint-${entry.id}`;
+                              const speakingThis =
+                                voice.isSpeaking && voice.activeSourceId === srcId;
+                              const spokenPayload = `${entry.hint!.diagnosticoTecnico}. ${entry.hint!.perguntaSocratica}. Dica prática: ${entry.hint!.pistaDirecionada}. Próximo passo: ${entry.hint!.proximoPasso}`;
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => voice.toggleSpeak(spokenPayload, srcId)}
+                                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md border text-[11px] font-semibold transition-colors ${
+                                    speakingThis
+                                      ? 'bg-rose-500/15 border-rose-400/40 text-rose-200'
+                                      : 'bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-400/30 text-cyan-200'
+                                  }`}
+                                >
+                                  {speakingThis ? (
+                                    <Square className="w-3 h-3 fill-current" />
+                                  ) : (
+                                    <Volume2 className="w-3.5 h-3.5" />
+                                  )}
+                                  {speakingThis ? 'Parar' : 'Ouvir'}
+                                </button>
+                              );
+                            })()}
+                          </div>
                         </div>
                         <p className="text-sm text-slate-200 leading-relaxed">
                           {entry.hint.diagnosticoTecnico}
@@ -895,7 +1142,7 @@ export function CodeEditorPanel({
                     type="text"
                     value={hintReplyInput}
                     onChange={(e) => setHintReplyInput(e.target.value)}
-                    placeholder="Responda à pergunta socrática ou conte o que você tentou..."
+                    placeholder="Responda ao Professor ou conte o que você tentou..."
                     className="flex-1 min-h-[44px] px-3.5 py-2.5 rounded-xl bg-[#0B0F19] border border-white/10 text-base sm:text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-cyan-400"
                   />
                   <button
@@ -907,6 +1154,17 @@ export function CodeEditorPanel({
                     Responder
                   </button>
                 </form>
+
+                {progressiveHintLevel === 0 && (
+                  <button
+                    type="button"
+                    onClick={handleOpenProgressiveHint}
+                    className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-300 hover:text-amber-200 transition-colors"
+                  >
+                    <Lightbulb className="w-3.5 h-3.5" />
+                    Quero também a dica passo a passo da aula (Nível 1, 2 e 3)
+                  </button>
+                )}
               </div>
             )}
 
@@ -915,28 +1173,189 @@ export function CodeEditorPanel({
                 <Loader2 className="w-5 h-5 text-cyan-400 animate-spin shrink-0" />
                 <span>
                   {reviewLoading
-                    ? 'Professor Doutor I.A. analisando legibilidade, casos extremos e complexidade Big-O...'
-                    : 'Professor Doutor I.A. preparando uma orientação socrática sem entregar a resposta pronta...'}
+                    ? 'Professor I.A. analisando legibilidade, clareza e casos especiais do seu código...'
+                    : 'Professor I.A. lendo seu código para preparar uma dica sob medida (máx. 15s)...'}
                 </span>
               </div>
             )}
 
-            {hintError && (
-              <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-start justify-between gap-3 text-xs text-rose-200">
-                <div>
-                  <p className="font-semibold text-rose-300">Não foi possível gerar a dica</p>
-                  <p className="mt-1">{hintError}</p>
+            {/* Bulletproof Progressive Local Hints (Auto-shown on AI fallback OR on demand) */}
+            {(progressiveHintLevel > 0 || hintError) && (() => {
+              const effectiveLevel = progressiveHintLevel > 0 ? progressiveHintLevel : 1;
+              const fallback3Hints: [string, string, string] = progressiveHints ?? [
+                localFallbackHint?.diagnostico ??
+                  `Releia o enunciado de "${challengeTitle}" e confira o que a função "${functionName}" recebe de entrada e o que deve devolver.`,
+                localFallbackHint
+                  ? `${localFallbackHint.pergunta} ${localFallbackHint.proximoPasso}`
+                  : `Resolva primeiro o caso mais simples passo a passo, guardando o resultado em uma variável antes do return.`,
+                `Confira se a função "${functionName}" devolve explicitamente o valor esperado com return em todos os caminhos e teste com ${langMeta.consoleCommand} para ver cada valor.`,
+              ];
+              const failedNow = runResult ? runResult.results.filter((r) => !r.passed) : [];
+
+              return (
+                <div className="space-y-3">
+                  {/* Discreet honest notice when AI couldn't respond — NEVER a dead-end red wall */}
+                  {hintError && (
+                    <div className="p-3.5 rounded-xl bg-slate-800/70 border border-amber-400/25 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs text-slate-200">
+                      <div className="space-y-0.5">
+                        <p className="font-semibold text-amber-200">
+                          Professor I.A. indisponível no momento — ativamos a Dica Guiada da Aula para você não travar!
+                        </p>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Motivo: {hintError}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={hintLoading}
+                        onClick={() => handleAskHint(lastFailedHintReply)}
+                        className="min-h-[36px] px-3 py-1.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/15 text-slate-100 font-semibold whitespace-nowrap shrink-0 self-start sm:self-center transition-colors"
+                      >
+                        Tentar I.A. novamente
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Failed tests or compile error quick diagnosis */}
+                  {(runResult?.compileError || failedNow.length > 0) && (
+                    <div className="p-3.5 rounded-xl bg-[#0B0F19] border border-white/[0.08] space-y-1.5 text-xs">
+                      <p className="font-semibold text-slate-200">
+                        O que os testes mostraram agora:
+                      </p>
+                      {runResult?.compileError ? (
+                        <p className="font-mono text-rose-300 whitespace-pre-wrap leading-relaxed">
+                          {runResult.compileError}
+                        </p>
+                      ) : (
+                        <ul className="space-y-1 text-slate-300 font-mono text-[11px]">
+                          {failedNow.slice(0, 3).map((t) => (
+                            <li key={t.id}>
+                              • {t.label}: esperado{' '}
+                              <span className="text-emerald-300">{formatValue(t.expected)}</span>, veio{' '}
+                              <span className="text-rose-300">
+                                {t.error ? `Erro (${t.error})` : formatValue(t.actual)}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Interactive 3-Level Progressive Hint Card */}
+                  <div className="p-4 rounded-xl bg-amber-500/[0.07] border border-amber-400/35 space-y-3 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-1.5 font-semibold text-amber-300">
+                        <Lightbulb className="w-4 h-4 shrink-0" />
+                        Dica Guiada da Aula · Nível {effectiveLevel} de 3
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-slate-400 hidden sm:inline">
+                          Instantânea · Funciona sempre
+                        </span>
+                        {voice.isSupported && (() => {
+                          const srcId = 'progressive-hint';
+                          const speakingThis =
+                            voice.isSpeaking && voice.activeSourceId === srcId;
+                          const spokenLevelText = `Dica guiada nível ${effectiveLevel}. ${fallback3Hints[effectiveLevel - 1]}`;
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => voice.toggleSpeak(spokenLevelText, srcId)}
+                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md border text-[11px] font-semibold transition-colors ${
+                                speakingThis
+                                  ? 'bg-rose-500/15 border-rose-400/40 text-rose-200'
+                                  : 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-400/35 text-amber-200'
+                              }`}
+                            >
+                              {speakingThis ? (
+                                <Square className="w-3 h-3 fill-current" />
+                              ) : (
+                                <Volume2 className="w-3.5 h-3.5" />
+                              )}
+                              {speakingThis ? 'Parar' : 'Ouvir'}
+                            </button>
+                          );
+                        })()}
+                      </div>
+                    </div>
+
+                    {/* Level 1 */}
+                    <div className="p-3 rounded-lg bg-[#0B0F19]/85 border border-white/[0.07] space-y-1">
+                      <p className="text-[11px] font-semibold text-cyan-300">
+                        Nível 1 · Empurrãozinho suave
+                      </p>
+                      <p className="text-sm text-slate-100 leading-relaxed">
+                        {fallback3Hints[0]}
+                      </p>
+                      {localFallbackHint && progressiveHints && (
+                        <p className="text-xs text-slate-400 pt-1 leading-relaxed">
+                          Análise do seu código atual: {localFallbackHint.diagnostico}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Level 2 */}
+                    {effectiveLevel >= 2 && (
+                      <div className="p-3 rounded-lg bg-[#0B0F19]/85 border border-amber-400/25 space-y-1">
+                        <p className="text-[11px] font-semibold text-amber-300">
+                          Nível 2 · Passo a passo do que escrever
+                        </p>
+                        <p className="text-sm text-slate-100 leading-relaxed">
+                          {fallback3Hints[1]}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Level 3 */}
+                    {effectiveLevel >= 3 && (
+                      <div className="p-3 rounded-lg bg-[#0B0F19]/85 border border-emerald-400/30 space-y-2">
+                        <p className="text-[11px] font-semibold text-emerald-300">
+                          Nível 3 · Molde quase pronto (complete os espaços!)
+                        </p>
+                        <p className="text-xs text-slate-200 leading-relaxed">
+                          {fallback3Hints[2]}
+                        </p>
+                        {progressiveHintTemplate && (
+                          <pre className="p-3 rounded-lg bg-[#080C15] border border-white/[0.08] font-mono text-xs text-emerald-200 overflow-x-auto leading-relaxed">
+                            <code>{progressiveHintTemplate}</code>
+                          </pre>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Progressive escalation button */}
+                    <div className="pt-1 flex flex-wrap items-center justify-between gap-2">
+                      {effectiveLevel < 3 ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nextLvl: 2 | 3 = effectiveLevel < 2 ? 2 : 3;
+                            setProgressiveHintLevel(nextLvl);
+                            if (voice.autoSpeak && voice.isSupported) {
+                              voice.speak(
+                                `Dica nível ${nextLvl}. ${fallback3Hints[nextLvl - 1]}`,
+                                'progressive-hint'
+                              );
+                            }
+                          }}
+                          className="inline-flex items-center justify-center gap-1.5 min-h-[40px] px-4 py-2 rounded-lg bg-amber-400 hover:bg-amber-300 text-[#0B0F19] font-semibold text-xs transition-colors"
+                        >
+                          <Lightbulb className="w-3.5 h-3.5" />
+                          {effectiveLevel === 1
+                            ? 'Quero uma dica mais fácil (Passo a passo)'
+                            : 'Quero uma dica mais fácil (Ver molde do código)'}
+                        </button>
+                      ) : (
+                        <p className="text-[11px] text-emerald-300 font-medium">
+                          Complete o molde acima no editor e clique em &ldquo;Executar Testes&rdquo; para testar!
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  disabled={hintLoading}
-                  onClick={() => handleAskHint(lastFailedHintReply)}
-                  className="px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-100 font-medium shrink-0"
-                >
-                  Tentar novamente
-                </button>
-              </div>
-            )}
+              );
+            })()}
 
             {reviewError && (
               <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-start justify-between gap-3 text-xs text-rose-200">
@@ -960,10 +1379,46 @@ export function CodeEditorPanel({
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-xs font-medium text-purple-300">
-                      Code Review Universitário · {reviewData.seloQualidade}
+                      Code Review · {reviewData.seloQualidade}
                     </p>
                     <p className="text-xs font-mono text-slate-400 mt-0.5">{reviewData.complexidadeBigO}</p>
                   </div>
+                  {voice.isSupported && (() => {
+                    const srcId = 'code-review-card';
+                    const speakingThis =
+                      voice.isSpeaking && voice.activeSourceId === srcId;
+                    const reviewSpeech = [
+                      `Resultado do Code Review: ${reviewData.seloQualidade}.`,
+                      reviewData.resumoGeral,
+                      reviewData.pontosFortes.length > 0
+                        ? `Pontos fortes: ${reviewData.pontosFortes.join('. ')}.`
+                        : '',
+                      reviewData.sugestoesMelhoria.length > 0
+                        ? `Sugestões de melhoria: ${reviewData.sugestoesMelhoria.join('. ')}.`
+                        : '',
+                      `Sobre casos especiais: ${reviewData.alertaCasosExtremos}`,
+                    ]
+                      .filter(Boolean)
+                      .join(' ');
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => voice.toggleSpeak(reviewSpeech, srcId)}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md border text-xs font-semibold transition-colors ${
+                          speakingThis
+                            ? 'bg-rose-500/15 border-rose-400/40 text-rose-200'
+                            : 'bg-purple-500/12 hover:bg-purple-500/20 border-purple-400/35 text-purple-200'
+                        }`}
+                      >
+                        {speakingThis ? (
+                          <Square className="w-3 h-3 fill-current" />
+                        ) : (
+                          <Volume2 className="w-3.5 h-3.5" />
+                        )}
+                        {speakingThis ? 'Parar' : 'Ouvir'}
+                      </button>
+                    );
+                  })()}
                 </div>
 
                 <p className="text-sm text-slate-200 leading-relaxed">{reviewData.resumoGeral}</p>
@@ -973,7 +1428,7 @@ export function CodeEditorPanel({
                   {[
                     { label: 'Legibilidade', val: reviewData.notas.legibilidade },
                     { label: 'Nomenclatura', val: reviewData.notas.nomenclatura },
-                    { label: 'Casos Extremos', val: reviewData.notas.casosExtremos },
+                    { label: 'Casos Especiais', val: reviewData.notas.casosExtremos },
                     { label: 'Eficiência', val: reviewData.notas.eficiencia },
                   ].map((item) => (
                     <div
@@ -1008,23 +1463,38 @@ export function CodeEditorPanel({
                 </div>
 
                 <div className="p-3 rounded-lg bg-white/[0.03] border border-white/[0.06] text-xs text-slate-300">
-                  <strong className="text-slate-100">Auditoria de casos extremos:</strong>{' '}
+                  <strong className="text-slate-100">Cuidado com casos especiais:</strong>{' '}
                   {reviewData.alertaCasosExtremos}
                 </div>
               </div>
             )}
 
-            {!hintLoading && !reviewLoading && hintThread.length === 0 && !reviewData && !hintError && !reviewError && (
-              <div className="p-5 rounded-xl bg-[#0B0F19] border border-white/[0.06] text-xs text-slate-400 space-y-2">
-                <p className="text-slate-200 font-medium text-sm">Mentoria com rigor universitário</p>
-                <p>
-                  Travou em um teste? Clique em <strong className="text-cyan-300">Dica Socrática (I.A.)</strong> para entender o conceito sem perder o aprendizado e conversar passo a passo com o Professor.
-                </p>
-                <p>
-                  Quer elevar seu nível de código? Clique em <strong className="text-purple-300">Code Review (I.A.)</strong> para receber avaliação de legibilidade, nomenclatura, casos extremos e complexidade Big-O (+25 XP).
-                </p>
-              </div>
-            )}
+            {!hintLoading &&
+              !reviewLoading &&
+              hintThread.length === 0 &&
+              !reviewData &&
+              !hintError &&
+              !reviewError &&
+              progressiveHintLevel === 0 && (
+                <div className="p-5 rounded-xl bg-[#0B0F19] border border-white/[0.06] text-xs text-slate-400 space-y-3">
+                  <p className="text-slate-200 font-medium text-sm">Precisa de uma mãozinha?</p>
+                  <p className="leading-relaxed">
+                    Travou em algum passo? Clique em <strong className="text-cyan-300">Dica Socrática (I.A.)</strong> para receber uma orientação adaptada ao seu código — ou abra agora a <strong className="text-amber-300">Dica Guiada da Aula</strong> com 3 níveis progressivos.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    {!examMode && (
+                      <button
+                        type="button"
+                        onClick={handleOpenProgressiveHint}
+                        className="inline-flex items-center gap-1.5 min-h-[38px] px-3.5 py-2 rounded-lg bg-amber-500/12 hover:bg-amber-500/20 border border-amber-400/35 text-amber-200 font-semibold transition-colors"
+                      >
+                        <Lightbulb className="w-3.5 h-3.5" />
+                        Ver Dica Guiada (Nível 1, 2 e 3)
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
 
             <div ref={aiPanelEndRef} />
           </div>

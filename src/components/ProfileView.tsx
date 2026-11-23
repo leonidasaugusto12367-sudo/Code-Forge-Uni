@@ -707,27 +707,35 @@ export function ProfileView({
           </div>
 
           <div className="space-y-1.5">
-            <p className="text-xs font-medium text-slate-300">Nível declarado</p>
-            <div className="grid grid-cols-2 gap-2.5">
+            <p className="text-xs font-medium text-slate-300">
+              Nível de experiência (ajusta o tom do Professor I.A.)
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               {(
                 [
-                  { id: 'zero', label: 'Nunca programei' },
-                  { id: 'basico', label: 'Básico de lógica' },
+                  { id: 'zero', label: 'Não sei nada' },
+                  { id: 'basico', label: 'Sei o básico' },
+                  { id: 'intermediario', label: 'Já tenho base' },
                 ] as { id: InitialLevel; label: string }[]
-              ).map((lvl) => (
-                <button
-                  key={lvl.id}
-                  type="button"
-                  onClick={() => onUpdateProfile({ initialLevel: lvl.id })}
-                  className={`px-3 py-2 text-xs font-medium rounded-lg border transition-colors ${
-                    profile.initialLevel === lvl.id
-                      ? 'bg-purple-500/15 border-purple-400 text-white'
-                      : 'bg-[#0B0F19] border-white/10 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {lvl.label}
-                </button>
-              ))}
+              ).map((lvl) => {
+                const currentLevel = profile.experienceLevel ?? profile.initialLevel;
+                return (
+                  <button
+                    key={lvl.id}
+                    type="button"
+                    onClick={() =>
+                      onUpdateProfile({ initialLevel: lvl.id, experienceLevel: lvl.id })
+                    }
+                    className={`px-3 py-2.5 text-xs font-medium rounded-lg border transition-colors ${
+                      currentLevel === lvl.id
+                        ? 'bg-purple-500/15 border-purple-400 text-white'
+                        : 'bg-[#0B0F19] border-white/10 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {lvl.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 

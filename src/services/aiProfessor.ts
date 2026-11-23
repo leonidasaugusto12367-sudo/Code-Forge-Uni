@@ -49,9 +49,31 @@ export function normalizeHistoryForApi(
   return result;
 }
 
-async function postJson<T>(url: string, body: Record<string, unknown>): Promise<T> {
+const CLIENT_TIMEOUT_MS = 35000;
+const HINT_CLIENT_TIMEOUT_MS = 15000;
+
+function truncateClientText(text: string | undefined, maxChars: number): string {
+  if (!text) return '';
+  const trimmed = text.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  return `${trimmed.slice(0, maxChars)}…`;
+}
+
+function isAbortError(err: unknown): boolean {
+  if (err instanceof DOMException && err.name === 'AbortError') return true;
+  if (err && typeof err === 'object' && 'name' in err && (err as { name?: unknown }).name === 'AbortError') {
+    return true;
+  }
+  return false;
+}
+
+async function postJson<T>(
+  url: string,
+  body: Record<string, unknown>,
+  timeoutMs: number = CLIENT_TIMEOUT_MS
+): Promise<T> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 35000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(url, {
@@ -72,16 +94,28 @@ async function postJson<T>(url: string, body: Record<string, unknown>): Promise<
     }
 
     if (!response.ok) {
-      throw new Error(
-        typeof payload?.error === 'string' && payload.error.trim().length > 0
-          ? payload.error
-          : `Erro ao consultar o Professor I.A. (${response.status}). Tente novamente.`
-      );
+      if (typeof payload?.error === 'string' && payload.error.trim().length > 0) {
+        throw new Error(payload.error.trim());
+      }
+      if (response.status === 502 || response.status === 503 || response.status === 504) {
+        throw new Error(
+          `O servidor está acordando ou temporariamente indisponível (HTTP ${response.status}).`
+        );
+      }
+      throw new Error(`Erro ao consultar o Professor I.A. (HTTP ${response.status}).`);
     }
     return payload as T;
   } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new Error('O Professor I.A. demorou mais do que o esperado para responder. Tente novamente.');
+    if (isAbortError(err)) {
+      const secs = Math.max(1, Math.round(timeoutMs / 1000));
+      throw new Error(
+        `A I.A. demorou mais de ${secs} segundos para responder agora.`
+      );
+    }
+    if (err instanceof TypeError) {
+      throw new Error(
+        'Não foi possível conectar ao servidor da CodeForge Uni. Verifique sua conexão com a internet.'
+      );
     }
     throw err;
   } finally {
@@ -113,48 +147,60 @@ export async function requestSocraticHint(params: {
   careerTrack: CareerTrackId;
   studentName: string;
   programmingLanguage: ProgrammingLanguage;
+  experienceLevel?: InitialLevel;
+  moduleId?: string;
+  lessonOrder?: number;
   history?: ConversationTurnInput[];
   studentReply?: string;
 }): Promise<SocraticHintResponse> {
-  const data = await postJson<Partial<SocraticHintResponse>>('/api/ai/hint', {
-    lessonTitle: params.lessonTitle,
-    prompt: params.prompt,
-    studentCode: params.studentCode,
-    failedTests: params.failedTests.map((t) => ({
-      label: t.label,
-      input: t.input,
-      expected: t.expected,
-      actual: t.actual,
-      error: t.error,
-    })),
-    careerTrack: params.careerTrack,
-    studentName: params.studentName,
-    programmingLanguage: params.programmingLanguage,
-    history: normalizeHistoryForApi(params.history),
-    studentReply: params.studentReply?.trim() || undefined,
-  });
+  const data = await postJson<Partial<SocraticHintResponse>>(
+    '/api/ai/hint',
+    {
+      lessonTitle: truncateClientText(params.lessonTitle, 140),
+      prompt: truncateClientText(params.prompt, 500),
+      studentCode: truncateClientText(params.studentCode, 3500),
+      failedTests: params.failedTests.slice(0, 4).map((t) => ({
+        label: truncateClientText(t.label, 60),
+        input: t.input,
+        expected: t.expected,
+        actual: t.actual,
+        error: t.error ? truncateClientText(t.error, 140) : undefined,
+      })),
+      careerTrack: params.careerTrack,
+      studentName: truncateClientText(params.studentName, 60),
+      programmingLanguage: params.programmingLanguage,
+      experienceLevel: params.experienceLevel ?? 'zero',
+      moduleId: params.moduleId,
+      lessonOrder: params.lessonOrder,
+      history: normalizeHistoryForApi(params.history).slice(-6),
+      studentReply: params.studentReply?.trim()
+        ? truncateClientText(params.studentReply, 800)
+        : undefined,
+    },
+    HINT_CLIENT_TIMEOUT_MS
+  );
 
   return {
     diagnosticoTecnico:
       typeof data.diagnosticoTecnico === 'string' && data.diagnosticoTecnico.trim()
         ? data.diagnosticoTecnico.trim()
-        : 'Analise como sua função está tratando os valores recebidos nos casos que falharam.',
+        : 'Vamos olhar com calma o que sua função está devolvendo nos casos que falharam.',
     perguntaSocratica:
       typeof data.perguntaSocratica === 'string' && data.perguntaSocratica.trim()
         ? data.perguntaSocratica.trim()
-        : 'Qual linha do seu código produz um valor diferente do esperado no primeiro teste com falha?',
+        : 'Qual linha do seu código produz um valor diferente do esperado no primeiro teste?',
     pistaDirecionada:
       typeof data.pistaDirecionada === 'string' && data.pistaDirecionada.trim()
         ? data.pistaDirecionada.trim()
-        : 'Inspecione o fluxo passo a passo para confirmar o valor de cada variável.',
+        : 'Confira cada variável passo a passo e veja se o return devolve exatamente o pedido.',
     conceitoAcademico:
       typeof data.conceitoAcademico === 'string' && data.conceitoAcademico.trim()
         ? data.conceitoAcademico.trim()
-        : 'Depuração e Casos Extremos',
+        : 'Passo a passo da lógica',
     proximoPasso:
       typeof data.proximoPasso === 'string' && data.proximoPasso.trim()
         ? data.proximoPasso.trim()
-        : 'Ajuste sua lógica na IDE e clique em Executar Testes para validar.',
+        : 'Faça um pequeno ajuste no editor e clique em Executar Testes para conferir.',
   };
 }
 
@@ -166,8 +212,14 @@ export async function requestCodeReview(params: {
   careerTrack: CareerTrackId;
   studentName: string;
   programmingLanguage: ProgrammingLanguage;
+  experienceLevel?: InitialLevel;
+  moduleId?: string;
+  lessonOrder?: number;
 }): Promise<CodeReviewResponse> {
-  return postJson<CodeReviewResponse>('/api/ai/review', params);
+  return postJson<CodeReviewResponse>('/api/ai/review', {
+    ...params,
+    experienceLevel: params.experienceLevel ?? 'zero',
+  });
 }
 
 export async function askProfessorTutor(params: {
@@ -175,16 +227,19 @@ export async function askProfessorTutor(params: {
   codeSnippet?: string;
   careerTrack: CareerTrackId;
   level: InitialLevel;
+  experienceLevel?: InitialLevel;
   programmingLanguage: ProgrammingLanguage;
   history: ConversationTurnInput[];
 }): Promise<TutorResponse> {
+  const effectiveLevel = params.experienceLevel ?? params.level;
   const data = await postJson<Partial<TutorResponse>>('/api/ai/tutor', {
-    question: params.question,
-    codeSnippet: params.codeSnippet,
+    question: truncateClientText(params.question, 1200),
+    codeSnippet: params.codeSnippet ? truncateClientText(params.codeSnippet, 3800) : undefined,
     careerTrack: params.careerTrack,
-    level: params.level,
+    level: effectiveLevel,
+    experienceLevel: effectiveLevel,
     programmingLanguage: params.programmingLanguage,
-    history: normalizeHistoryForApi(params.history),
+    history: normalizeHistoryForApi(params.history).slice(-8),
   });
 
   return {

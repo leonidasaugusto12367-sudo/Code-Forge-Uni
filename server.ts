@@ -4,14 +4,15 @@ import type { NextFunction, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT) || 3000;
-const MODEL_NAME = 'gemini-4-hydrogen';
+const MODEL_NAME = 'gemini-2.5-flash';
 const FALLBACK_MODEL_NAME = 'gemini-3.1-flash-lite';
+const SERVER_GEMINI_TIMEOUT_MS = 25000;
 
 type ServerProgrammingLanguage = 'javascript' | 'python' | 'java' | 'csharp' | 'cpp';
 
@@ -63,22 +64,73 @@ function resolveLanguageInfo(rawLang: unknown) {
   return { id: key, ...LANGUAGE_INFO[key] };
 }
 
+type ServerExperienceLevel = 'zero' | 'basico' | 'intermediario';
+
+function normalizeExperienceLevel(raw: unknown): ServerExperienceLevel {
+  if (raw === 'basico' || raw === 'intermediario' || raw === 'zero') {
+    return raw;
+  }
+  return 'zero';
+}
+
+function buildLevelPedagogyInstruction(
+  rawLevel: unknown,
+  moduleId?: unknown,
+  lessonOrder?: unknown
+): string {
+  const level = normalizeExperienceLevel(rawLevel);
+  const orderNum = typeof lessonOrder === 'number' ? lessonOrder : Number(lessonOrder);
+  const isAdvancedModule =
+    moduleId === 'mod-5' ||
+    moduleId === 'mod-6' ||
+    (Number.isFinite(orderNum) && orderNum >= 12);
+
+  if (level === 'zero' && !isAdvancedModule) {
+    return [
+      'PERFIL DO ALUNO: INICIANTE ABSOLUTO ("Não sei nada de programação").',
+      '- Fale como um mentor super paciente e acolhedor com alguém vendo código pela primeira vez na vida.',
+      '- Escreva de forma natural e conversada, como se estivesse falando em voz alta ao lado do aluno (o texto pode ser lido em áudio): use frases curtas, fluidas e diretas, sem listas pesadas de símbolos ou markdown no meio das frases.',
+      '- Use analogias do dia a dia (caixinhas com etiqueta, jogos, receitas de bolo, placar de pontos).',
+      '- No máximo 2 parágrafos bem curtos. Um pequeno passo de cada vez.',
+      '- EVITE jargão técnico intimidador (como "clamping", "invariante", "pré-normalização", "assintótico"). Se precisar citar qualquer termo de programação, traduza imediatamente para português simples.',
+      '- Verifique sempre erros simples de iniciante no código (esqueceu return, erro de digitação no nome da variável, aspas faltando, usou = em vez de === ou ==, sinal trocado).',
+    ].join('\n');
+  }
+
+  if (level === 'basico' && !isAdvancedModule) {
+    return [
+      'PERFIL DO ALUNO: BÁSICO ("Sei apenas o básico").',
+      '- Use tom paciente, natural e conversado (como se estivesse explicando em voz alta para o aluno), com frases curtas e exemplos concretos (jogos, apps, listas).',
+      '- Evite excesso de marcações Markdown ou símbolos soltos nas explicações faladas; coloque código apenas no campo dedicado de exemplo.',
+      '- Mantenha as respostas curtas (no máximo 2 parágrafos curtos por seção) e foque em um ajuste por vez.',
+      '- Introduza termos técnicos aos poucos, sempre traduzindo o significado em português simples.',
+    ].join('\n');
+  }
+
+  return [
+    'PERFIL DO ALUNO: INTERMEDIÁRIO / MÓDULO AVANÇADO UNIVERSITÁRIO.',
+    '- Use linguagem clara e profissional, introduzindo gradualmente a terminologia universitária de Ciência da Computação (casos extremos, complexidade Big-O, busca binária, pilha LIFO, caso base recursivo) sempre com explicação objetiva.',
+    '- Mantenha as explicações enxutas, práticas e focadas no próximo passo.',
+  ].join('\n');
+}
+
 const PROFESSOR_SYSTEM_INSTRUCTION = `
-Você é o Professor Doutor da CodeForge Uni: Doutor em Ciência da Computação e Engenheiro de Software Sênior com vasta experiência em ensino universitário (CC, Engenharia de Software, Sistemas de Informação e Jogos Digitais) e indústria de tecnologia.
+Você é o Professor Mentor da CodeForge Uni: especialista em Ciência da Computação e ensino de programação para estudantes que vão do zero absoluto até o nível universitário.
 
 DIRETRIZES PEDAGÓGICAS INEGOCIÁVEIS:
-1. Idioma exclusivo: Português do Brasil natural, claro, direto, respeitoso e motivador para jovens estudantes.
-2. Rigor técnico absoluto: NUNCA invente sintaxe inexistente na linguagem escolhida pelo aluno (JavaScript, Python, Java, C# ou C++) e NUNCA simplifique conceitos a ponto de ensinar errado. Use terminologia correta da computação (escopo léxico, imutabilidade, complexidade assintótica Big-O, invariante de laço, caso base, casos extremos/edge cases) explicando sempre de forma acessível.
-3. Método Socrático em dúvidas e erros: quando o aluno erra um exercício, explique a causa técnica exata do erro e faça uma pergunta orientadora inteligente que leve o aluno a descobrir a correção sozinho. NUNCA entregue o código final resolvido pronto quando o pedido for de dica socrática.
-4. Code Review rigoroso: avalie sempre (a) Legibilidade e clareza estrutural, (b) Nomenclatura semântica de variáveis e funções, (c) Tratamento de casos extremos (entrada vazia, zero, negativos, limites, tipos), e (d) Eficiência algorítmica e complexidade (Big-O) respeitando os idiomas da linguagem escolhida.
+1. Idioma exclusivo: Português do Brasil natural, claro, acolhedor e motivador.
+2. Rigor técnico sem intimidar: NUNCA invente sintaxe inexistente na linguagem escolhida pelo aluno (JavaScript, Python, Java, C# ou C++) e NUNCA ensine errado. Adapte o vocabulário estritamente ao nível do aluno (para iniciantes, fale simples com analogias do dia a dia; para intermediários/módulos avançados, introduza termos universitários com clareza).
+3. Método Socrático em dúvidas e dicas: explique de forma simples onde está o detalhe a ajustar no código atual (incluindo erros de digitação ou sintaxe) e dê um pequeno passo por vez. NUNCA entregue o código final 100% pronto na dica socrática.
+4. Code Review construtivo: avalie (a) Legibilidade, (b) Nomes claros de variáveis, (c) Casos especiais (zero, vazio, negativos), e (d) Organização/eficiência respeitando a linguagem escolhida e o nível do estudante.
 5. Responda estritamente no formato JSON solicitado pelo schema, sem markdown extra fora das strings.
 `.trim();
 
 function getAiClient(): GoogleGenAI {
   const apiKey = (process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim();
   if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
-    const err = new Error('GEMINI_API_KEY não configurada no ambiente.');
-    (err as Error & { statusCode?: number }).statusCode = 503;
+    const err = new Error('MISSING_API_KEY: GEMINI_API_KEY não configurada no servidor.');
+    (err as Error & { statusCode?: number; code?: string }).statusCode = 503;
+    (err as Error & { statusCode?: number; code?: string }).code = 'MISSING_API_KEY';
     throw err;
   }
   return new GoogleGenAI({
@@ -89,6 +141,50 @@ function getAiClient(): GoogleGenAI {
       },
     },
   });
+}
+
+function truncateText(value: unknown, maxChars: number): string {
+  if (typeof value !== 'string') return '';
+  const trimmed = value.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  return `${trimmed.slice(0, maxChars)}…`;
+}
+
+function getFastThinkingConfig(model: string) {
+  if (model.startsWith('gemini-2.5')) {
+    return { thinkingBudget: 0 };
+  }
+  if (model.startsWith('gemini-3')) {
+    return { thinkingLevel: ThinkingLevel.MINIMAL };
+  }
+  if (model.startsWith('gemini-4')) {
+    return { thinkingLevel: ThinkingLevel.LOW };
+  }
+  return undefined;
+}
+
+async function raceWithTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout?: () => void): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(() => {
+          onTimeout?.();
+          const timeoutErr = new Error(
+            `SERVER_TIMEOUT: A API Gemini excedeu o limite de ${Math.round(timeoutMs / 1000)} segundos no servidor.`
+          );
+          (timeoutErr as Error & { statusCode?: number; code?: string }).statusCode = 504;
+          (timeoutErr as Error & { statusCode?: number; code?: string }).code = 'SERVER_TIMEOUT';
+          reject(timeoutErr);
+        }, Math.max(1000, timeoutMs));
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
 }
 
 interface NormalizedHistoryItem {
@@ -387,55 +483,105 @@ function runPreFlightSyntaxCheck(
   return null;
 }
 
+interface CallGeminiOptions {
+  extraSystemInstruction?: string;
+  maxOutputTokens?: number;
+  timeoutMs?: number;
+}
+
 async function callGeminiRaw(
   contents: string | GeminiContentTurn[],
   responseSchema: Record<string, unknown>,
-  extraSystemInstruction?: string
+  optionsOrInstruction?: string | CallGeminiOptions
 ): Promise<string> {
+  const options: CallGeminiOptions =
+    typeof optionsOrInstruction === 'string'
+      ? { extraSystemInstruction: optionsOrInstruction }
+      : optionsOrInstruction ?? {};
+
   const ai = getAiClient();
   const modelsToTry = [MODEL_NAME, FALLBACK_MODEL_NAME];
+  const totalTimeoutMs = options.timeoutMs ?? SERVER_GEMINI_TIMEOUT_MS;
+  const deadline = Date.now() + totalTimeoutMs;
   let lastError: unknown;
 
-  for (const model of modelsToTry) {
-    const maxRetries = model === MODEL_NAME ? 2 : 1;
+  for (let modelIdx = 0; modelIdx < modelsToTry.length; modelIdx++) {
+    const model = modelsToTry[modelIdx];
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 1500) {
+      const timeoutErr = new Error(
+        `SERVER_TIMEOUT: A API Gemini excedeu o limite de ${Math.round(totalTimeoutMs / 1000)} segundos no servidor.`
+      );
+      (timeoutErr as Error & { statusCode?: number; code?: string }).statusCode = 504;
+      (timeoutErr as Error & { statusCode?: number; code?: string }).code = 'SERVER_TIMEOUT';
+      throw timeoutErr;
+    }
 
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        const response = await ai.models.generateContent({
+    const controller = new AbortController();
+    const thinkingConfig = getFastThinkingConfig(model);
+    const systemInstruction = options.extraSystemInstruction
+      ? `${PROFESSOR_SYSTEM_INSTRUCTION}\n\n${options.extraSystemInstruction}`
+      : PROFESSOR_SYSTEM_INSTRUCTION;
+
+    try {
+      const response = await raceWithTimeout(
+        ai.models.generateContent({
           model,
           contents,
           config: {
-            systemInstruction: extraSystemInstruction
-              ? `${PROFESSOR_SYSTEM_INSTRUCTION}\n\n${extraSystemInstruction}`
-              : PROFESSOR_SYSTEM_INSTRUCTION,
+            systemInstruction,
             responseMimeType: 'application/json',
             responseSchema,
+            ...(thinkingConfig ? { thinkingConfig } : {}),
+            ...(options.maxOutputTokens ? { maxOutputTokens: options.maxOutputTokens } : {}),
+            abortSignal: controller.signal,
           },
-        });
+        }),
+        remainingMs,
+        () => controller.abort()
+      );
 
-        const rawText = (response.text ?? '').trim();
-        if (!rawText) {
-          throw new Error('O Professor I.A. retornou uma resposta vazia.');
-        }
-        return rawText;
-      } catch (error) {
-        lastError = error;
-        const msg = error instanceof Error ? error.message : String(error);
-        const isTransient =
-          msg.includes('429') ||
-          msg.includes('503') ||
-          msg.includes('500') ||
-          msg.includes('UNAVAILABLE') ||
-          msg.includes('RESOURCE_EXHAUSTED');
-
-        if (!isTransient) {
-          throw error;
-        }
-
-        if (attempt < maxRetries) {
-          await new Promise((resolve) => setTimeout(resolve, 600 * Math.pow(2, attempt)));
-        }
+      const rawText = (response.text ?? '').trim();
+      if (!rawText) {
+        throw new Error('O Professor I.A. retornou uma resposta vazia.');
       }
+      return rawText;
+    } catch (error) {
+      lastError = error;
+      const errObj = error as { statusCode?: number; status?: number; code?: string; message?: string };
+      const msg = error instanceof Error ? error.message : String(error);
+      const upper = msg.toUpperCase();
+
+      // Never retry missing/invalid key or hard server timeout
+      if (
+        errObj?.code === 'SERVER_TIMEOUT' ||
+        errObj?.code === 'MISSING_API_KEY' ||
+        upper.includes('SERVER_TIMEOUT') ||
+        upper.includes('API_KEY_INVALID') ||
+        upper.includes('PERMISSION_DENIED') ||
+        errObj?.status === 401 ||
+        errObj?.status === 403
+      ) {
+        throw error;
+      }
+
+      const canFallback =
+        modelIdx < modelsToTry.length - 1 &&
+        (upper.includes('404') ||
+          upper.includes('NOT_FOUND') ||
+          upper.includes('429') ||
+          upper.includes('RESOURCE_EXHAUSTED') ||
+          upper.includes('503') ||
+          upper.includes('500') ||
+          upper.includes('UNAVAILABLE') ||
+          upper.includes('OVERLOADED'));
+
+      if (canFallback && deadline - Date.now() > 3000) {
+        console.warn(`[AI Fallback] Modelo ${model} falhou (${msg.slice(0, 120)}). Tentando ${modelsToTry[modelIdx + 1]}.`);
+        continue;
+      }
+
+      throw error;
     }
   }
 
@@ -443,28 +589,95 @@ async function callGeminiRaw(
 }
 
 function handleApiError(res: Response, error: unknown) {
+  const errObj = error as { statusCode?: number; status?: number; code?: string; message?: string };
   const message = error instanceof Error ? error.message : 'Erro inesperado ao consultar o Professor I.A.';
-  const statusCode = (error as { statusCode?: number; status?: number })?.statusCode
-    ?? (error as { status?: number })?.status
-    ?? (message.includes('API_KEY_INVALID') || message.includes('PERMISSION_DENIED') ? 403 : 500);
+  const upper = message.toUpperCase();
 
-  let userMessage = 'Não foi possível conectar ao Professor I.A. agora. Tente novamente em instantes.';
-  if (message.includes('GEMINI_API_KEY') || message.includes('API_KEY_INVALID') || message.includes('PERMISSION_DENIED') || statusCode === 403) {
-    userMessage = 'Verifique se a chave da API Gemini está configurada no painel Settings > Secrets do ambiente.';
-  } else if (message.includes('429') || message.includes('RESOURCE_EXHAUSTED')) {
-    userMessage = 'Limite temporário de requisições da I.A. atingido. Aguarde alguns segundos e tente novamente.';
-  } else if (message.includes('503') || message.includes('UNAVAILABLE')) {
-    userMessage = 'O servidor do Professor I.A. está temporariamente com alta demanda. Aguarde alguns segundos e clique em Tentar novamente.';
-  } else if (message.includes('404') || message.includes('NOT_FOUND')) {
-    userMessage = 'Modelo de I.A. indisponível no momento. Tente novamente em instantes.';
-  } else if (message.includes('400') || message.includes('INVALID_ARGUMENT')) {
-    userMessage = 'Não foi possível processar o formato desta solicitação. Tente reenviar sua mensagem.';
-  } else if (message.includes('interpretar a resposta')) {
+  let httpStatus = 500;
+  let errorCode = errObj?.code || 'AI_API_ERROR';
+  let userMessage = 'Erro ao consultar a API Gemini no servidor. Clique em Tentar novamente em instantes.';
+
+  if (errorCode === 'MISSING_API_KEY' || upper.includes('MISSING_API_KEY') || upper.includes('GEMINI_API_KEY NÃO CONFIGURADA')) {
+    httpStatus = 503;
+    errorCode = 'MISSING_API_KEY';
+    userMessage =
+      'A chave GEMINI_API_KEY não está configurada no servidor. Adicione GEMINI_API_KEY (ou API_KEY) nas variáveis de ambiente do servidor (ex: Render ou Settings > Secrets).';
+  } else if (
+    upper.includes('API_KEY_INVALID') ||
+    upper.includes('PERMISSION_DENIED') ||
+    upper.includes('API KEY NOT VALID') ||
+    errObj?.statusCode === 401 ||
+    errObj?.status === 401 ||
+    errObj?.statusCode === 403 ||
+    errObj?.status === 403
+  ) {
+    httpStatus = 403;
+    errorCode = 'INVALID_API_KEY';
+    userMessage =
+      'A chave GEMINI_API_KEY configurada no servidor é inválida ou sem permissão (403). Verifique a chave nas variáveis de ambiente.';
+  } else if (
+    errorCode === 'SERVER_TIMEOUT' ||
+    upper.includes('SERVER_TIMEOUT') ||
+    errObj?.statusCode === 504 ||
+    errObj?.status === 504
+  ) {
+    httpStatus = 504;
+    errorCode = 'SERVER_TIMEOUT';
+    userMessage =
+      'A API Gemini demorou mais de 25 segundos para responder no servidor (timeout 504). Clique em Tentar novamente.';
+  } else if (
+    upper.includes('429') ||
+    upper.includes('RESOURCE_EXHAUSTED') ||
+    upper.includes('QUOTA') ||
+    errObj?.statusCode === 429 ||
+    errObj?.status === 429
+  ) {
+    httpStatus = 429;
+    errorCode = 'RATE_LIMIT';
+    userMessage =
+      'Limite gratuito temporário da API Gemini atingido (429). Aguarde cerca de 15 a 30 segundos e clique em Tentar novamente.';
+  } else if (
+    upper.includes('503') ||
+    upper.includes('UNAVAILABLE') ||
+    upper.includes('OVERLOADED') ||
+    errObj?.statusCode === 503 ||
+    errObj?.status === 503
+  ) {
+    httpStatus = 503;
+    errorCode = 'SERVICE_UNAVAILABLE';
+    userMessage =
+      'A API Gemini está temporariamente sobrecarregada (503). Aguarde alguns segundos e clique em Tentar novamente.';
+  } else if (
+    upper.includes('404') ||
+    upper.includes('NOT_FOUND') ||
+    errObj?.statusCode === 404 ||
+    errObj?.status === 404
+  ) {
+    httpStatus = 404;
+    errorCode = 'MODEL_NOT_FOUND';
+    userMessage =
+      'O modelo Gemini solicitado não está disponível para esta chave de API (404). Verifique o acesso da chave no Google AI Studio.';
+  } else if (
+    upper.includes('400') ||
+    upper.includes('INVALID_ARGUMENT') ||
+    errObj?.statusCode === 400 ||
+    errObj?.status === 400
+  ) {
+    httpStatus = 400;
+    errorCode = 'INVALID_ARGUMENT';
+    userMessage =
+      'A API Gemini recusou o formato desta solicitação (400). Tente encurtar o código ou reenviar a pergunta.';
+  } else if (message.includes('interpretar a resposta') || message.includes('estruturar as 3 etapas')) {
+    httpStatus = 502;
+    errorCode = 'INVALID_AI_JSON';
     userMessage = message;
   }
 
-  res.status(typeof statusCode === 'number' && statusCode >= 400 && statusCode < 600 ? statusCode : 500).json({
+  console.error(`[AI API Error] ${httpStatus} (${errorCode}): ${message.slice(0, 240)}`);
+
+  res.status(httpStatus).json({
     error: userMessage,
+    code: errorCode,
     details: process.env.NODE_ENV === 'production' ? undefined : message,
   });
 }
@@ -502,6 +715,9 @@ async function startServer() {
         careerTrack,
         studentName,
         programmingLanguage,
+        experienceLevel,
+        moduleId,
+        lessonOrder,
         history,
         studentReply,
       } = req.body ?? {};
@@ -512,50 +728,51 @@ async function startServer() {
       }
 
       const langInfo = resolveLanguageInfo(programmingLanguage);
+      const pedagogyInstruction = buildLevelPedagogyInstruction(experienceLevel, moduleId, lessonOrder);
+      const compactTitle = truncateText(lessonTitle, 140);
+      const compactPrompt = truncateText(prompt, 550);
+      const compactCode = truncateText(studentCode, 3800);
 
       const failedSummary = Array.isArray(failedTests) && failedTests.length > 0
         ? failedTests
+            .slice(0, 4)
             .map(
               (t: { label?: string; input?: unknown; expected?: unknown; actual?: unknown; error?: string }) =>
-                `- Teste "${t.label ?? 'Caso'}": entrada=${JSON.stringify(t.input)}, esperado=${JSON.stringify(t.expected)}, obtido=${t.error ? `ERRO: ${t.error}` : JSON.stringify(t.actual)}`
+                `- Teste "${truncateText(t.label ?? 'Caso', 60)}": entrada=${truncateText(JSON.stringify(t.input), 120)}, esperado=${truncateText(JSON.stringify(t.expected), 100)}, obtido=${t.error ? `ERRO: ${truncateText(t.error, 140)}` : truncateText(JSON.stringify(t.actual), 100)}`
             )
             .join('\n')
         : 'O aluno ainda não executou testes ou pediu orientação antes de finalizar.';
 
-      const trimmedReply = typeof studentReply === 'string' ? studentReply.trim() : '';
+      const trimmedReply = truncateText(studentReply, 800);
 
       const currentTurnPrompt = trimmedReply
         ? `
-Contexto do exercício: ${lessonTitle}
-Linguagem escolhida pelo aluno: ${langInfo.name} (${langInfo.extension})
-Código atual do aluno na IDE:
+Exercício: ${compactTitle} (${langInfo.name})
+Código atual:
 \`\`\`${langInfo.fence}
-${studentCode}
+${compactCode}
 \`\`\`
-Testes com falha no momento:
+Testes com falha:
 ${failedSummary}
 
-Resposta ou nova dúvida do aluno sobre sua orientação anterior:
-${trimmedReply}
+Resposta do aluno: ${trimmedReply}
 
-Continue a orientação socrática em Português do Brasil específica para ${langInfo.name}, avaliando o raciocínio do aluno, corrigindo imprecisões conceituais e guiando o próximo passo sem entregar o código pronto.
+Continue a orientação socrática curta, paciente e objetiva em PT-BR para ${langInfo.name}, sem entregar o código pronto.
 `.trim()
         : `
-Aluno: ${studentName || 'Estudante'}
-Trilha de interesse: ${careerTrack || 'explorador'}
-Linguagem de programação escolhida: ${langInfo.name} (${langInfo.extension})
-Desafio: ${lessonTitle}
-Enunciado: ${prompt}
+Aluno: ${truncateText(studentName || 'Estudante', 60)} · Linguagem: ${langInfo.name} (${langInfo.extension}) · Trilha: ${careerTrack || 'explorador'}
+Desafio: ${compactTitle}
+Enunciado: ${compactPrompt}
 
-Código atual do aluno (${langInfo.name}):
+Código atual (${langInfo.name}):
 \`\`\`${langInfo.fence}
-${studentCode}
+${compactCode}
 \`\`\`
 
-Resultados dos testes com falha:
+Testes com falha:
 ${failedSummary}
 
-Forneça uma orientação socrática rigorosa em Português do Brasil específica para ${langInfo.name}. NÃO forneça a solução completa pronta. Explique o erro técnico ou conceitual observado e faça uma pergunta que guie o estudante a corrigir o próprio código.
+Analise o código atual do aluno (incluindo erros de digitação, return faltando ou lógica incompleta) e dê uma orientação socrática curta, amigável e direta em PT-BR para ${langInfo.name}. NÃO entregue a solução pronta.
 `.trim();
 
       const schema = {
@@ -563,23 +780,23 @@ Forneça uma orientação socrática rigorosa em Português do Brasil específic
         properties: {
           diagnosticoTecnico: {
             type: Type.STRING,
-            description: 'Explicação clara e tecnicamente precisa da causa do erro ou lacuna lógica atual.',
+            description: 'Explicação simples e objetiva (1-2 frases curtas) do que precisa de ajuste no código atual.',
           },
           perguntaSocratica: {
             type: Type.STRING,
-            description: 'Uma pergunta direta e instigante que leve o aluno a raciocinar sobre a correção.',
+            description: 'Uma pergunta amigável e direta (1 frase) que ajude o aluno a pensar no próximo passo.',
           },
           pistaDirecionada: {
             type: Type.STRING,
-            description: 'Uma dica prática sem entregar o código pronto.',
+            description: 'Uma dica prática curta (1-2 frases) explicando um pequeno passo sem entregar a resposta pronta.',
           },
           conceitoAcademico: {
             type: Type.STRING,
-            description: 'Nome e breve definição do conceito de Ciência da Computação envolvido.',
+            description: 'Nome curto e acessível do conceito praticado nesta aula.',
           },
           proximoPasso: {
             type: Type.STRING,
-            description: 'Ação imediata sugerida para testar na IDE.',
+            description: 'Uma ação pequena e imediata (1 frase) para testar no editor agora.',
           },
         },
         required: [
@@ -591,8 +808,13 @@ Forneça uma orientação socrática rigorosa em Português do Brasil específic
         ],
       };
 
-      const multiTurnContents = buildMultiTurnContents(history, currentTurnPrompt);
-      const rawText = await callGeminiRaw(multiTurnContents, schema);
+      const trimmedHistory = Array.isArray(history) ? history.slice(-6) : [];
+      const multiTurnContents = buildMultiTurnContents(trimmedHistory, currentTurnPrompt);
+      const rawText = await callGeminiRaw(multiTurnContents, schema, {
+        extraSystemInstruction: `${pedagogyInstruction}\n\nSeja extremamente conciso e rápido: no máximo 2 frases curtas por campo JSON.`,
+        maxOutputTokens: 650,
+        timeoutMs: 13000,
+      });
       const { parsed, cleanedText } = safeParseGeminiJson<{
         diagnosticoTecnico: string;
         perguntaSocratica: string;
@@ -604,23 +826,23 @@ Forneça uma orientação socrática rigorosa em Português do Brasil específic
       res.json({
         diagnosticoTecnico: asNonEmptyString(
           parsed?.diagnosticoTecnico,
-          cleanedText || 'Analise cuidadosamente como sua função trata os parâmetros de entrada e os casos extremos.'
+          cleanedText || 'Vamos olhar com calma o que sua função está devolvendo nos testes que falharam.'
         ),
         perguntaSocratica: asNonEmptyString(
           parsed?.perguntaSocratica,
-          'O que sua função retorna exatamente quando recebe o primeiro caso de teste que falhou?'
+          'O que sua função devolve exatamente quando recebe os valores do primeiro teste que falhou?'
         ),
         pistaDirecionada: asNonEmptyString(
           parsed?.pistaDirecionada,
-          `Use ${langInfo.consoleCmd} nos valores intermediários e compare com o retorno esperado em cada teste.`
+          `Revise linha por linha e confira se há um return devolvendo o valor certo (você pode usar ${langInfo.consoleCmd} para espiar os valores).`
         ),
         conceitoAcademico: asNonEmptyString(
           parsed?.conceitoAcademico,
-          'Rastreamento de Estado e Casos Extremos'
+          'Passo a passo da lógica'
         ),
         proximoPasso: asNonEmptyString(
           parsed?.proximoPasso,
-          'Ajuste uma condição por vez na IDE e clique em Executar Testes para validar sua hipótese.'
+          'Faça um pequeno ajuste no editor e clique em Executar Testes para ver o resultado.'
         ),
       });
     } catch (error) {
@@ -639,6 +861,9 @@ Forneça uma orientação socrática rigorosa em Português do Brasil específic
         careerTrack,
         studentName,
         programmingLanguage,
+        experienceLevel,
+        moduleId,
+        lessonOrder,
       } = req.body ?? {};
       if (!lessonTitle || typeof studentCode !== 'string') {
         res.status(400).json({ error: 'Código obrigatório para realizar o Code Review.' });
@@ -646,6 +871,7 @@ Forneça uma orientação socrática rigorosa em Português do Brasil específic
       }
 
       const langInfo = resolveLanguageInfo(programmingLanguage);
+      const pedagogyInstruction = buildLevelPedagogyInstruction(experienceLevel, moduleId, lessonOrder);
 
       const userPrompt = `
 Aluno: ${studentName || 'Estudante'}
@@ -661,27 +887,27 @@ Código submetido para Code Review (${langInfo.name}):
 ${studentCode}
 \`\`\`
 
-Faça um Code Review rigoroso de nível universitário e engenharia de software sênior em Português do Brasil para código escrito em ${langInfo.name}.
+Faça um Code Review construtivo e claro em Português do Brasil para código escrito em ${langInfo.name}, adaptado ao nível atual do aluno.
 Avalie de 0 a 10:
-- legibilidade (clareza, indentação, fluxo lógico e idioma de ${langInfo.name})
-- nomenclatura (nomes semânticos seguindo as convenções de ${langInfo.name})
-- casosExtremos (proteção contra entradas vazias, valores negativos, zero, limites e tipos)
-- eficiencia (uso adequado de estruturas de dados de ${langInfo.name}, complexidade temporal/espacial Big-O)
+- legibilidade (clareza, organização e leitura fácil em ${langInfo.name})
+- nomenclatura (nomes fáceis de entender seguindo as convenções de ${langInfo.name})
+- casosExtremos (cuidado com entradas vazias, zero, negativos e limites)
+- eficiencia (solução enxuta e adequada em ${langInfo.name})
 
-Forneça a complexidade estimada (ex: "O(n) tempo · O(1) espaço"), pontos fortes reais, melhorias concretas (sem reescrever tudo à toa se já estiver bom) e um selo de qualidade.
+Forneça a complexidade estimada de forma compreensível (ex: "Direto ao ponto · O(1)" ou "Tempo O(n) · Espaço O(1)"), pontos fortes reais, melhorias práticas e um selo de qualidade.
 `.trim();
 
       const schema = {
         type: Type.OBJECT,
         properties: {
-          resumoGeral: { type: Type.STRING, description: 'Síntese técnica da qualidade do código.' },
+          resumoGeral: { type: Type.STRING, description: 'Síntese clara e motivadora da qualidade do código.' },
           seloQualidade: {
             type: Type.STRING,
-            description: 'Classificação curta: ex. "Em Evolução", "Sólido", "Nível Universitário" ou "Engenharia Limpa".',
+            description: 'Classificação curta: ex. "Em Evolução", "Mandou Bem", "Sólido" ou "Engenharia Limpa".',
           },
           complexidadeBigO: {
             type: Type.STRING,
-            description: 'Análise concisa de tempo e espaço, ex: "Tempo O(n) · Espaço O(1)".',
+            description: 'Análise concisa de velocidade e memória, ex: "Rápido e direto · O(1)" ou "Tempo O(n) · Espaço O(1)".',
           },
           notas: {
             type: Type.OBJECT,
@@ -703,7 +929,7 @@ Forneça a complexidade estimada (ex: "O(n) tempo · O(1) espaço"), pontos fort
           },
           alertaCasosExtremos: {
             type: Type.STRING,
-            description: 'Observação específica sobre edge cases tratados ou faltantes.',
+            description: 'Observação amigável sobre casos especiais (zero, vazio, negativos) tratados ou faltantes.',
           },
         },
         required: [
@@ -717,7 +943,10 @@ Forneça a complexidade estimada (ex: "O(n) tempo · O(1) espaço"), pontos fort
         ],
       };
 
-      const rawText = await callGeminiRaw(userPrompt, schema);
+      const rawText = await callGeminiRaw(userPrompt, schema, {
+        extraSystemInstruction: `${pedagogyInstruction}\n\nSeja direto e conciso: resumo de até 2 frases, no máximo 3 itens curtos em pontosFortes e 3 em sugestoesMelhoria.`,
+        maxOutputTokens: 850,
+      });
       const { parsed, cleanedText } = safeParseGeminiJson<{
         resumoGeral: string;
         seloQualidade: string;
@@ -761,7 +990,17 @@ Forneça a complexidade estimada (ex: "O(n) tempo · O(1) espaço"), pontos fort
   // 3. Socratic Professor Q&A Tutor endpoint (multi-turn with strict role normalization)
   app.post('/api/ai/tutor', async (req: Request, res: Response) => {
     try {
-      const { question, codeSnippet, careerTrack, level, programmingLanguage, history } = req.body ?? {};
+      const {
+        question,
+        codeSnippet,
+        careerTrack,
+        level,
+        experienceLevel,
+        moduleId,
+        lessonOrder,
+        programmingLanguage,
+        history,
+      } = req.body ?? {};
       const cleanQuestion = typeof question === 'string' ? question.trim() : '';
       const cleanCode = typeof codeSnippet === 'string' ? codeSnippet.trim() : '';
 
@@ -771,18 +1010,21 @@ Forneça a complexidade estimada (ex: "O(n) tempo · O(1) espaço"), pontos fort
       }
 
       const langInfo = resolveLanguageInfo(programmingLanguage);
+      const effectiveLevel = experienceLevel ?? level ?? 'zero';
+      const pedagogyInstruction = buildLevelPedagogyInstruction(effectiveLevel, moduleId, lessonOrder);
       const effectiveQuestion = cleanQuestion || 'Analise este código e me ajude com minha resposta.';
       const currentUserMessage = cleanCode
         ? `${effectiveQuestion}\n\nTrecho de código anexado pelo aluno (${langInfo.name}):\n\`\`\`${langInfo.fence}\n${cleanCode}\n\`\`\``
         : effectiveQuestion;
 
       const contextInstruction = `
+${pedagogyInstruction}
+
 Contexto do aluno nesta conversa:
 - Trilha escolhida: ${careerTrack || 'explorador'}
-- Nível inicial: ${level || 'iniciante'}
 - Linguagem de programação ativa do estudante: ${langInfo.name} (${langInfo.extension})
 
-Responda com rigor acadêmico e didática clara em Português do Brasil. Sempre que incluir exemplos de código em \`exemploCodigo\`, escreva código 100% válido e idiomático em ${langInfo.name} (salvo se o aluno pedir explicitamente outra linguagem). Se o aluno estiver respondendo à sua pergunta socrática anterior, avalie a resposta dele com precisão, elogie o que acertou, corrija o que estiver impreciso e avance o raciocínio. Se o aluno pedir para fazer um exercício inteiro por ele, use o método socrático e explique o princípio técnico.
+Responda em Português do Brasil claro, acolhedor e didático. Sempre que incluir exemplos de código em \`exemploCodigo\`, escreva código curto, 100% válido e fácil de ler em ${langInfo.name} (salvo se o aluno pedir outra linguagem). Se o aluno estiver respondendo à sua pergunta anterior, elogie o que acertou, ajuste o que precisar com leveza e avance um pequeno passo de cada vez.
 `.trim();
 
       const schema = {
@@ -790,23 +1032,23 @@ Responda com rigor acadêmico e didática clara em Português do Brasil. Sempre 
         properties: {
           explicacao: {
             type: Type.STRING,
-            description: 'Explicação principal clara, rigorosa e estruturada em parágrafos curtos.',
+            description: 'Explicação principal clara, acolhedora e estruturada em no máximo 2 parágrafos curtos.',
           },
           analogiaPratica: {
             type: Type.STRING,
-            description: 'Conexão prática com a área de interesse do aluno (jogos, web, dados ou sistemas).',
+            description: 'Analogia do dia a dia (jogos, caixinhas, receitas, apps) conectada à área de interesse do aluno.',
           },
           exemploCodigo: {
             type: Type.STRING,
-            description: `Exemplo curto e 100% válido em ${langInfo.name} que ilustra o conceito (ou string vazia se não couber código).`,
+            description: `Exemplo bem curto e 100% válido em ${langInfo.name} que ilustra o conceito (ou string vazia se não couber código).`,
           },
           perguntaVerificacao: {
             type: Type.STRING,
-            description: 'Pergunta socrática rápida para confirmar se o aluno compreendeu o conceito.',
+            description: 'Pergunta rápida e amigável para confirmar se o aluno entendeu a ideia.',
           },
           topicoRelacionado: {
             type: Type.STRING,
-            description: 'Disciplina universitária relacionada (ex: Algoritmos I, Estruturas de Dados, Arquitetura de Software).',
+            description: 'Tema curto relacionado (ex: Variáveis, Decisões com if/else, Laços de Repetição ou Estruturas de Dados).',
           },
         },
         required: [
@@ -818,8 +1060,12 @@ Responda com rigor acadêmico e didática clara em Português do Brasil. Sempre 
         ],
       };
 
-      const multiTurnContents = buildMultiTurnContents(history, currentUserMessage);
-      const rawText = await callGeminiRaw(multiTurnContents, schema, contextInstruction);
+      const trimmedHistory = Array.isArray(history) ? history.slice(-8) : [];
+      const multiTurnContents = buildMultiTurnContents(trimmedHistory, currentUserMessage);
+      const rawText = await callGeminiRaw(multiTurnContents, schema, {
+        extraSystemInstruction: `${contextInstruction}\n\nMantenha a resposta didática, paciente e enxuta (no máximo 2 parágrafos curtos e exemplo de código bem simples).`,
+        maxOutputTokens: 900,
+      });
       const { parsed, cleanedText } = safeParseGeminiJson<{
         explicacao: string;
         analogiaPratica: string;
@@ -920,7 +1166,9 @@ REGRAS ESTRITAS PARA TESTABILIDADE REAL:
         ],
       };
 
-      const rawText = await callGeminiRaw(userPrompt, schema);
+      const rawText = await callGeminiRaw(userPrompt, schema, {
+        maxOutputTokens: 1400,
+      });
       const { parsed } = safeParseGeminiJson<{
         titulo: string;
         descricao: string;
@@ -1010,7 +1258,9 @@ Explique o porquê com base nas respostas, indique os cursos universitários mai
         ],
       };
 
-      const rawText = await callGeminiRaw(userPrompt, schema);
+      const rawText = await callGeminiRaw(userPrompt, schema, {
+        maxOutputTokens: 700,
+      });
       const { parsed } = safeParseGeminiJson<{
         trilhaRecomendada: string;
         tituloTrilha: string;
@@ -1161,7 +1411,9 @@ REGRAS DE COMPILAÇÃO E AVALIAÇÃO INEGOCIÁVEIS:
         required: ['compileError', 'logs', 'results'],
       };
 
-      const rawText = await callGeminiRaw(evalPrompt, schema);
+      const rawText = await callGeminiRaw(evalPrompt, schema, {
+        maxOutputTokens: 1200,
+      });
       const { parsed } = safeParseGeminiJson<{
         compileError: string;
         logs: string[];
@@ -1354,7 +1606,9 @@ REGRAS ESTRITAS:
         required: ['titulo', 'resumo', 'xpRecompensa', 'blueprint', 'etapas'],
       };
 
-      const rawText = await callGeminiRaw(userPrompt, schema);
+      const rawText = await callGeminiRaw(userPrompt, schema, {
+        maxOutputTokens: 2400,
+      });
       const { parsed } = safeParseGeminiJson<{
         titulo: string;
         resumo: string;

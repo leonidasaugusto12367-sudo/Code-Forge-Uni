@@ -14,6 +14,7 @@ import { TrackDashboard } from './components/TrackDashboard';
 import { ALL_LESSONS, getLessonById } from './data/curriculum';
 import { useCodeForgeStore } from './hooks/useCodeForgeStore';
 import { AppTab } from './types';
+import { stopSpeech } from './utils/voiceProfessor';
 
 const MOBILE_MODE_STORAGE_KEY = 'codeforge-mobile-mode-v1';
 
@@ -72,12 +73,21 @@ export default function App() {
     }
   }, [mobileViewMode]);
 
+  useEffect(() => {
+    stopSpeech();
+  }, [activeAccountId, activeTab, activeLessonId]);
+
   const toggleMobileViewMode = () => setMobileViewMode((prev) => !prev);
 
   const nextLesson = useMemo(() => {
     const completedSet = new Set(progress?.completedLessonIds ?? []);
+    const experience = profile?.experienceLevel ?? profile?.initialLevel;
+    if (completedSet.size === 0 && experience === 'intermediario') {
+      const mod2Start = ALL_LESSONS.find((l) => l.id === 'm2-l1');
+      if (mod2Start) return mod2Start;
+    }
     return ALL_LESSONS.find((l) => !completedSet.has(l.id)) ?? null;
-  }, [progress?.completedLessonIds]);
+  }, [progress?.completedLessonIds, profile?.experienceLevel, profile?.initialLevel]);
 
   const completedValidCount = useMemo(() => {
     const completedSet = new Set(progress?.completedLessonIds ?? []);
@@ -173,18 +183,21 @@ export default function App() {
   }
 
   const handleSelectTab = (tab: AppTab) => {
+    stopSpeech();
     setActiveTab(tab);
     setActiveLessonId(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleOpenLesson = (lessonId: string) => {
+    stopSpeech();
     setActiveTab('trilha');
     setActiveLessonId(lessonId);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleLogout = () => {
+    stopSpeech();
     setActiveLessonId(null);
     setActiveTab('trilha');
     setExplorerModalOpen(false);

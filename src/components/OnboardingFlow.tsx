@@ -306,55 +306,76 @@ export function OnboardingFlow({
               )}
 
               {step === 2 && (
-                <div className="space-y-6">
+                <div className="space-y-5">
                   <div>
                     <p className="text-xs text-slate-400 mb-1">Etapa 2 de 4 · Ponto de partida</p>
                     <h2 className="text-2xl font-bold text-white">Qual é sua experiência atual?</h2>
                     <p className="text-sm text-slate-400 mt-1">
-                      Sem pressão: ajustamos o ritmo das explicações e liberamos acesso livre aos módulos conforme seu nível.
+                      Sem pressão! Isso define o jeito que o Professor I.A. explica e qual aula recomendamos primeiro. Você pode mudar depois no Perfil.
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-4">
+                  <div className="grid grid-cols-1 gap-3.5">
                     <button
                       type="button"
                       onClick={() => setInitialLevel('zero')}
-                      className={`text-left p-5 rounded-xl border transition-colors ${
+                      className={`text-left p-4 sm:p-5 rounded-xl border transition-colors ${
                         initialLevel === 'zero'
                           ? 'bg-cyan-500/10 border-cyan-400/70'
                           : 'bg-[#0B0F19]/70 border-white/[0.08] hover:border-white/20'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-3">
-                        <h3 className="text-base font-semibold text-white">Nunca programei</h3>
+                        <h3 className="text-base font-semibold text-white">Não sei nada de programação</h3>
                         {initialLevel === 'zero' && <Check className="w-5 h-5 text-cyan-400 shrink-0" />}
                       </div>
                       <p className="text-sm text-slate-400 mt-1.5 leading-relaxed">
-                        Começo do zero absoluto: o que é memória, variáveis, lógica booleana e passo a passo até algoritmos universitários.
+                        Começo do zero absoluto: o que é uma variável, somas simples, textos e primeiras decisões com analogias do dia a dia e zero jargão difícil.
                       </p>
-                      <p className="text-xs text-cyan-300 mt-3">
-                        Recomendado · Começa no Módulo 01 com guia completo
+                      <p className="text-xs text-cyan-300 mt-2.5">
+                        Recomendado · Começa na Aula 1 (Bem fácil) com dicas passo a passo
                       </p>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => setInitialLevel('basico')}
-                      className={`text-left p-5 rounded-xl border transition-colors ${
+                      className={`text-left p-4 sm:p-5 rounded-xl border transition-colors ${
                         initialLevel === 'basico'
+                          ? 'bg-emerald-500/10 border-emerald-400/70'
+                          : 'bg-[#0B0F19]/70 border-white/[0.08] hover:border-white/20'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="text-base font-semibold text-white">Sei apenas o básico</h3>
+                        {initialLevel === 'basico' && <Check className="w-5 h-5 text-emerald-400 shrink-0" />}
+                      </div>
+                      <p className="text-sm text-slate-400 mt-1.5 leading-relaxed">
+                        Já vi um pouco de variáveis ou <code className="font-mono text-slate-200">if/else</code>, mas quero firmar a base com exercícios guiados sem pular etapas.
+                      </p>
+                      <p className="text-xs text-emerald-300 mt-2.5">
+                        Explicações simples e diretas · Evolução gradual até a faculdade
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setInitialLevel('intermediario')}
+                      className={`text-left p-4 sm:p-5 rounded-xl border transition-colors ${
+                        initialLevel === 'intermediario'
                           ? 'bg-purple-500/10 border-purple-400/70'
                           : 'bg-[#0B0F19]/70 border-white/[0.08] hover:border-white/20'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-3">
-                        <h3 className="text-base font-semibold text-white">Já sei o básico de lógica</h3>
-                        {initialLevel === 'basico' && <Check className="w-5 h-5 text-purple-400 shrink-0" />}
+                        <h3 className="text-base font-semibold text-white">Já tenho base</h3>
+                        {initialLevel === 'intermediario' && <Check className="w-5 h-5 text-purple-400 shrink-0" />}
                       </div>
                       <p className="text-sm text-slate-400 mt-1.5 leading-relaxed">
-                        Já conheço `if/else` e laços simples. Quero dominar casos extremos, funções puras, estruturas de dados, busca binária e Big-O.
+                        Já programo o básico com tranquilidade e quero acelerar para lógica composta, laços, busca binária, pilhas, recursão e nível universitário.
                       </p>
-                      <p className="text-xs text-purple-300 mt-3">
-                        Todos os 6 módulos liberados desde o primeiro dia
+                      <p className="text-xs text-purple-300 mt-2.5">
+                        Sugere começar pelo Módulo 02 (todos os módulos seguem livres)
                       </p>
                     </button>
                   </div>

@@ -23,7 +23,7 @@ const LEGACY_PROFILE_KEY = 'codeforge_uni_profile_v1';
 const LEGACY_PROGRESS_KEY = 'codeforge_uni_progress_v1';
 
 const VALID_TRACKS = new Set<CareerTrackId>(['explorador', 'jogos', 'web', 'dados', 'sistemas']);
-const VALID_LEVELS = new Set<InitialLevel>(['zero', 'basico']);
+const VALID_LEVELS = new Set<InitialLevel>(['zero', 'basico', 'intermediario']);
 
 export const ACCOUNT_AVATAR_COLORS: {
   id: AccountAvatarColor;
@@ -166,9 +166,10 @@ function createDefaultProfile(overrides?: Partial<StudentProfile>): StudentProfi
     typeof overrides?.careerTrack === 'string' && VALID_TRACKS.has(overrides.careerTrack as CareerTrackId)
       ? (overrides.careerTrack as CareerTrackId)
       : 'explorador';
+  const rawLevel = overrides?.experienceLevel ?? overrides?.initialLevel;
   const safeLevel: InitialLevel =
-    typeof overrides?.initialLevel === 'string' && VALID_LEVELS.has(overrides.initialLevel as InitialLevel)
-      ? (overrides.initialLevel as InitialLevel)
+    typeof rawLevel === 'string' && VALID_LEVELS.has(rawLevel as InitialLevel)
+      ? (rawLevel as InitialLevel)
       : 'zero';
 
   return {
@@ -178,6 +179,7 @@ function createDefaultProfile(overrides?: Partial<StudentProfile>): StudentProfi
         ? overrides.goal.trim()
         : 'Entrar na faculdade de tecnologia preparado e avançado',
     initialLevel: safeLevel,
+    experienceLevel: safeLevel,
     careerTrack: safeTrack,
     programmingLanguage: safeLanguage,
     onboardingComplete: Boolean(overrides?.onboardingComplete),
@@ -545,6 +547,7 @@ export function useCodeForgeStore() {
           name: cleanName,
           goal: data.goal,
           initialLevel: data.initialLevel,
+          experienceLevel: data.initialLevel,
           careerTrack: data.careerTrack,
           programmingLanguage: chosenLanguage,
           onboardingComplete: true,
@@ -847,6 +850,11 @@ export function useCodeForgeStore() {
         const nextLang = isValidProgrammingLanguage(patch.programmingLanguage)
           ? patch.programmingLanguage
           : acc.profile.programmingLanguage;
+        const rawNextLevel = patch.experienceLevel ?? patch.initialLevel;
+        const nextLevel: InitialLevel =
+          typeof rawNextLevel === 'string' && VALID_LEVELS.has(rawNextLevel as InitialLevel)
+            ? (rawNextLevel as InitialLevel)
+            : acc.profile.initialLevel;
         return {
           ...acc,
           name: nextName,
@@ -855,6 +863,8 @@ export function useCodeForgeStore() {
             ...acc.profile,
             ...patch,
             name: nextName,
+            initialLevel: nextLevel,
+            experienceLevel: nextLevel,
             programmingLanguage: nextLang,
           },
         };

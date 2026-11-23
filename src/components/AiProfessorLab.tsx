@@ -1,10 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertCircle, Code2, Loader2, RotateCcw, Send, Trash2 } from 'lucide-react';
+import {
+  AlertCircle,
+  Code2,
+  Loader2,
+  RotateCcw,
+  Send,
+  Square,
+  Trash2,
+  Volume2,
+  VolumeX,
+} from 'lucide-react';
 import professorEmblem from '../assets/images/professor_ai_emblem_1795049260003.jpg';
 import { getLanguageMeta } from '../data/languages';
 import { getTrackMeta } from '../data/tracks';
 import { askProfessorTutor } from '../services/aiProfessor';
-import { ProgrammingLanguage, SavedTutorMessage, StudentProfile } from '../types';
+import { InitialLevel, ProgrammingLanguage, SavedTutorMessage, StudentProfile, TutorResponse } from '../types';
+import {
+  primeSpeechOnUserGesture,
+  stopSpeech,
+  useVoiceProfessor,
+} from '../utils/voiceProfessor';
 
 interface AiProfessorLabProps {
   accountId: string;
@@ -21,7 +36,27 @@ interface PendingRetryPayload {
 
 const DEFAULT_CODE_ONLY_PROMPT = 'Analise este código e me ajude com minha resposta.';
 
-function getSuggestedQuestions(lang: ProgrammingLanguage): string[] {
+function getSuggestedQuestions(
+  lang: ProgrammingLanguage,
+  experienceLevel: InitialLevel
+): string[] {
+  if (experienceLevel === 'zero' || experienceLevel === 'basico') {
+    const beginnerLangQuestion: Record<ProgrammingLanguage, string> = {
+      javascript: 'Qual a diferença entre const e let na prática, com um exemplo simples?',
+      python: 'Como funcionam variáveis e texto (f-string) em Python bem passo a passo?',
+      java: 'Por que no Java preciso dizer se a caixinha guarda int ou String?',
+      csharp: 'Como criar variáveis e juntar texto com número em C# de um jeito fácil?',
+      cpp: 'Como declarar números e textos em C++ sem me perder nos símbolos?',
+    };
+
+    return [
+      'O que é uma variável na programação? Me explica com um exemplo bem simples do dia a dia.',
+      beginnerLangQuestion[lang],
+      'Como funciona o if e o else usando um exemplo de jogo ou compra em loja?',
+      'Para que serve o comando return no final de uma função?',
+    ];
+  }
+
   const languageSpecificQuestion: Record<ProgrammingLanguage, string> = {
     javascript: 'Qual a diferença real entre usar const, let e var no JavaScript moderno?',
     python: 'Quando devo usar lista, tupla, dicionário ou conjunto (set) em Python?',
@@ -36,6 +71,20 @@ function getSuggestedQuestions(lang: ProgrammingLanguage): string[] {
     'Como sei quando devo usar uma Pilha (Stack), Fila (Queue) ou Tabela Hash (Map)?',
     'O que preciso dominar antes do 1º semestre de Engenharia de Software ou Jogos Digitais?',
   ];
+}
+
+function buildTutorSpeechText(text: string, structured?: TutorResponse): string {
+  if (!structured) return text;
+  return [
+    structured.explicacao,
+    structured.analogiaPratica ? `Na prática: ${structured.analogiaPratica}` : '',
+    structured.exemploCodigo && structured.exemploCodigo.trim().length > 0
+      ? 'Acompanhe o exemplo de código na tela.'
+      : '',
+    structured.perguntaVerificacao ? `Para conferir: ${structured.perguntaVerificacao}` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 }
 
 export function AiProfessorLab({
@@ -55,9 +104,11 @@ export function AiProfessorLab({
 
   const feedEndRef = useRef<HTMLDivElement | null>(null);
   const mountedRef = useRef(true);
+  const voice = useVoiceProfessor({ stopOnUnmount: true });
   const trackMeta = getTrackMeta(profile.careerTrack);
   const langMeta = getLanguageMeta(profile.programmingLanguage);
-  const suggestedQuestions = getSuggestedQuestions(profile.programmingLanguage);
+  const experienceLevel: InitialLevel = profile.experienceLevel ?? profile.initialLevel;
+  const suggestedQuestions = getSuggestedQuestions(profile.programmingLanguage, experienceLevel);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -74,6 +125,7 @@ export function AiProfessorLab({
 
   const handleSend = async (customPrompt?: string, retryOverride?: PendingRetryPayload) => {
     if (loading) return;
+    primeSpeechOnUserGesture();
 
     const rawQuestion = retryOverride
       ? retryOverride.questionText
@@ -125,7 +177,8 @@ export function AiProfessorLab({
         question: effectiveQuestion,
         codeSnippet: attachedCode || undefined,
         careerTrack: profile.careerTrack,
-        level: profile.initialLevel,
+        level: experienceLevel,
+        experienceLevel,
         programmingLanguage: profile.programmingLanguage,
         history: priorHistory,
       });
@@ -141,6 +194,13 @@ export function AiProfessorLab({
       const nextMessages = [...withUser, assistantMsg];
       setMessages(nextMessages);
       onMessagesChange?.(nextMessages, accountId);
+
+      if (voice.autoSpeak && voice.isSupported) {
+        voice.speak(
+          buildTutorSpeechText(assistantMsg.text, assistantMsg.structured),
+          `tutor-msg-${assistantMsg.id}`
+        );
+      }
     } catch (err) {
       if (!mountedRef.current) return;
       // Remove pending user message so history stays valid and restore user inputs
@@ -188,28 +248,61 @@ export function AiProfessorLab({
             <p className="text-xs font-medium text-cyan-300">
               Plantão Socrático · Trilha {trackMeta.name} · Linguagem {langMeta.name} ({langMeta.extension})
             </p>
-            <h1 className="text-2xl font-bold text-white">Professor Doutor I.A.</h1>
+            <h1 className="text-2xl font-bold text-white">Professor I.A.</h1>
             <p className="text-sm text-slate-400 leading-relaxed">
-              Tire dúvidas sobre algoritmos, complexidade, arquitetura ou cole um trecho de código em {langMeta.name} para receber diagnóstico técnico guiado sem respostas rasas.
+              {experienceLevel === 'zero' || experienceLevel === 'basico'
+                ? `Pergunte qualquer coisa sem medo! Explicações simples, com analogias do dia a dia e exemplos curtos em ${langMeta.name} no seu ritmo.`
+                : `Tire dúvidas sobre algoritmos, complexidade, arquitetura ou cole um trecho de código em ${langMeta.name} para receber orientação guiada.`}
             </p>
           </div>
         </div>
 
-        {messages.length > 0 && !loading && (
-          <button
-            type="button"
-            onClick={() => {
-              setMessages([]);
-              onMessagesChange?.([], accountId);
-              setError(null);
-              setLastFailedPayload(null);
-            }}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-400 hover:text-white border border-white/10 hover:border-white/20 rounded-lg transition-colors whitespace-nowrap shrink-0"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            Nova conversa
-          </button>
-        )}
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {voice.isSupported && (
+            <button
+              type="button"
+              role="switch"
+              aria-checked={voice.autoSpeak}
+              onClick={() => voice.setAutoSpeak(!voice.autoSpeak)}
+              className={`inline-flex items-center gap-1.5 min-h-[40px] px-3 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap ${
+                voice.autoSpeak
+                  ? 'bg-emerald-500/15 border-emerald-400/45 text-emerald-200'
+                  : 'bg-[#0B0F19] border-white/10 text-slate-300 hover:text-white'
+              }`}
+            >
+              {voice.autoSpeak ? (
+                <Volume2 className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+              ) : (
+                <VolumeX className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              )}
+              <span>Ler respostas em voz alta</span>
+              <span
+                className={`font-mono text-[11px] ${
+                  voice.autoSpeak ? 'text-emerald-300' : 'text-slate-500'
+                }`}
+              >
+                {voice.autoSpeak ? 'ON' : 'OFF'}
+              </span>
+            </button>
+          )}
+
+          {messages.length > 0 && !loading && (
+            <button
+              type="button"
+              onClick={() => {
+                stopSpeech();
+                setMessages([]);
+                onMessagesChange?.([], accountId);
+                setError(null);
+                setLastFailedPayload(null);
+              }}
+              className="inline-flex items-center gap-1.5 min-h-[40px] px-3 py-2 text-xs font-medium text-slate-400 hover:text-white border border-white/10 hover:border-white/20 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Nova conversa
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Suggested Starter Prompts */}
@@ -241,13 +334,38 @@ export function AiProfessorLab({
                   : 'bg-[#111827] border-cyan-500/20 mr-0 sm:mr-6'
               }`}
             >
-              <div className="flex items-center justify-between gap-2 text-xs mb-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs mb-2">
                 <span className={msg.role === 'user' ? 'text-slate-300 font-semibold' : 'text-cyan-300 font-semibold'}>
-                  {msg.role === 'user' ? profile.name : 'Professor Doutor I.A.'}
+                  {msg.role === 'user' ? profile.name : 'Professor I.A.'}
                 </span>
-                {msg.structured?.topicoRelacionado && (
-                  <span className="text-slate-400">{msg.structured.topicoRelacionado}</span>
-                )}
+                <div className="flex items-center gap-2">
+                  {msg.structured?.topicoRelacionado && (
+                    <span className="text-slate-400">{msg.structured.topicoRelacionado}</span>
+                  )}
+                  {msg.role === 'assistant' && voice.isSupported && (() => {
+                    const srcId = `tutor-msg-${msg.id}`;
+                    const speakingThis = voice.isSpeaking && voice.activeSourceId === srcId;
+                    const spokenText = buildTutorSpeechText(msg.text, msg.structured);
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => voice.toggleSpeak(spokenText, srcId)}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md border text-[11px] font-semibold transition-colors ${
+                          speakingThis
+                            ? 'bg-rose-500/15 border-rose-400/40 text-rose-200'
+                            : 'bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-400/30 text-cyan-200'
+                        }`}
+                      >
+                        {speakingThis ? (
+                          <Square className="w-3 h-3 fill-current" />
+                        ) : (
+                          <Volume2 className="w-3.5 h-3.5" />
+                        )}
+                        {speakingThis ? 'Parar' : 'Ouvir'}
+                      </button>
+                    );
+                  })()}
+                </div>
               </div>
 
               <p className="text-sm text-slate-100 whitespace-pre-line leading-relaxed">{msg.text}</p>

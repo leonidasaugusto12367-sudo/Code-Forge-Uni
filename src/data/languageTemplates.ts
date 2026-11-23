@@ -3,15 +3,109 @@ import { ProgrammingLanguage } from '../types';
 type NonJsLanguage = Exclude<ProgrammingLanguage, 'javascript'>;
 
 const LESSON_TEMPLATES: Record<string, Record<NonJsLanguage, string>> = {
+  'm1-b1': {
+    python: `def somarPontos(pontos_atuais, pontos_ganhos):
+    # Passo 1: Crie uma variável "total" somando pontos_atuais + pontos_ganhos
+    # Passo 2: Devolva o resultado usando return total
+    pass`,
+    java: `public class Solucao {
+    public static int somarPontos(int pontosAtuais, int pontosGanhos) {
+        // Passo 1: Crie uma variável "total" somando pontosAtuais + pontosGanhos
+        // Passo 2: Devolva o resultado usando return total;
+        return 0;
+    }
+}`,
+    csharp: `public static class Solucao
+{
+    public static int SomarPontos(int pontosAtuais, int pontosGanhos)
+    {
+        // Passo 1: Crie uma variável "total" somando pontosAtuais + pontosGanhos
+        // Passo 2: Devolva o resultado usando return total;
+        return 0;
+    }
+}`,
+    cpp: `int somarPontos(int pontosAtuais, int pontosGanhos) {
+    // Passo 1: Crie uma variável "total" somando pontosAtuais + pontosGanhos
+    // Passo 2: Devolva o resultado usando return total;
+    return 0;
+}`,
+  },
+  'm1-b2': {
+    python: `def criarEtiquetaJogador(nome, pontos_iniciais, bonus):
+    # Passo 1: Crie uma variável "total" com pontos_iniciais + bonus
+    # Passo 2: Monte o texto no formato: f"{nome}: {total} pontos"
+    # Passo 3: Devolva o texto montado com return
+    pass`,
+    java: `public class Solucao {
+    public static String criarEtiquetaJogador(String nome, int pontosIniciais, int bonus) {
+        // Passo 1: Crie uma variável int total = pontosIniciais + bonus;
+        // Passo 2: Monte o texto: nome + ": " + total + " pontos"
+        // Passo 3: Devolva o texto usando return
+        return "";
+    }
+}`,
+    csharp: `public static class Solucao
+{
+    public static string CriarEtiquetaJogador(string nome, int pontosIniciais, int bonus)
+    {
+        // Passo 1: Crie uma variável int total = pontosIniciais + bonus;
+        // Passo 2: Monte o texto: $"{nome}: {total} pontos"
+        // Passo 3: Devolva o texto usando return
+        return "";
+    }
+}`,
+    cpp: `#include <string>
+
+std::string criarEtiquetaJogador(const std::string& nome, int pontosIniciais, int bonus) {
+    // Passo 1: Crie int total = pontosIniciais + bonus;
+    // Passo 2: Monte o texto: nome + ": " + std::to_string(total) + " pontos"
+    // Passo 3: Devolva o texto usando return
+    return "";
+}`,
+  },
+  'm1-b3': {
+    python: `def podeComprarItem(moedas_do_jogador, preco_do_item):
+    # Passo 1: Use if para verificar se moedas_do_jogador >= preco_do_item
+    #   Se for verdade, retorne "Compra liberada"
+    # Passo 2: Use else para retornar "Moedas insuficientes"
+    pass`,
+    java: `public class Solucao {
+    public static String podeComprarItem(int moedasDoJogador, int precoDoItem) {
+        // Passo 1: Use if (moedasDoJogador >= precoDoItem) para retornar "Compra liberada"
+        // Passo 2: Use else para retornar "Moedas insuficientes"
+        return "";
+    }
+}`,
+    csharp: `public static class Solucao
+{
+    public static string PodeComprarItem(int moedasDoJogador, int precoDoItem)
+    {
+        // Passo 1: Use if (moedasDoJogador >= precoDoItem) para retornar "Compra liberada"
+        // Passo 2: Use else para retornar "Moedas insuficientes"
+        return "";
+    }
+}`,
+    cpp: `#include <string>
+
+std::string podeComprarItem(int moedasDoJogador, int precoDoItem) {
+    // Passo 1: Use if (moedasDoJogador >= precoDoItem) para retornar "Compra liberada"
+    // Passo 2: Use else para retornar "Moedas insuficientes"
+    return "";
+}`,
+  },
   'm1-l1': {
     python: `def aplicarVariacao(valor_atual, delta, limite_maximo):
-    # Calcule o novo valor somando valor_atual + delta
-    # Garanta que o retorno fique sempre no intervalo [0, limite_maximo]
+    # Passo 1: Calcule novo_valor = valor_atual + delta
+    # Passo 2: Se novo_valor < 0, devolva 0
+    # Passo 3: Se novo_valor > limite_maximo, devolva limite_maximo
+    # Passo 4: Caso contrário, devolva novo_valor
     pass`,
     java: `public class Solucao {
     public static double aplicarVariacao(double valorAtual, double delta, double limiteMaximo) {
-        // Calcule o novo valor somando valorAtual + delta
-        // Garanta que o retorno fique sempre no intervalo [0, limiteMaximo]
+        // Passo 1: Calcule double novoValor = valorAtual + delta;
+        // Passo 2: Se novoValor < 0, retorne 0
+        // Passo 3: Se novoValor > limiteMaximo, retorne limiteMaximo
+        // Passo 4: Caso contrário, retorne novoValor
         return 0;
     }
 }`,
@@ -19,30 +113,34 @@ const LESSON_TEMPLATES: Record<string, Record<NonJsLanguage, string>> = {
 {
     public static double AplicarVariacao(double valorAtual, double delta, double limiteMaximo)
     {
-        // Calcule o novo valor somando valorAtual + delta
-        // Garanta que o retorno fique sempre no intervalo [0, limiteMaximo]
+        // Passo 1: Calcule double novoValor = valorAtual + delta;
+        // Passo 2: Se novoValor < 0, retorne 0
+        // Passo 3: Se novoValor > limiteMaximo, retorne limiteMaximo
+        // Passo 4: Caso contrário, retorne novoValor
         return 0;
     }
 }`,
     cpp: `#include <algorithm>
 
 double aplicarVariacao(double valorAtual, double delta, double limiteMaximo) {
-    // Calcule o novo valor somando valorAtual + delta
-    // Garanta que o retorno fique sempre no intervalo [0, limiteMaximo]
+    // Passo 1: Calcule double novoValor = valorAtual + delta;
+    // Passo 2: Se novoValor < 0, retorne 0
+    // Passo 3: Se novoValor > limiteMaximo, retorne limiteMaximo
+    // Passo 4: Caso contrário, retorne novoValor
     return 0;
 }`,
   },
   'm1-l2': {
     python: `def formatarCronometro(total_segundos):
-    # Valide se total_segundos é negativo ou inválido
-    # Calcule minutos inteiros (//) e segundos restantes (%)
-    # Retorne no formato "MM:SS"
+    # Passo 1: Se total_segundos < 0, retorne "00:00"
+    # Passo 2: Calcule minutos = total_segundos // 60 e segundos = total_segundos % 60
+    # Passo 3: Retorne no formato "MM:SS" (ex: f"{minutos:02d}:{segundos:02d}")
     pass`,
     java: `public class Solucao {
     public static String formatarCronometro(int totalSegundos) {
-        // Valide se totalSegundos é negativo
-        // Calcule minutos inteiros e segundos restantes (%)
-        // Retorne no formato "MM:SS" usando String.format("%02d:%02d", ...)
+        // Passo 1: Se totalSegundos < 0, retorne "00:00"
+        // Passo 2: Calcule minutos = totalSegundos / 60 e segundos = totalSegundos % 60
+        // Passo 3: Retorne String.format("%02d:%02d", minutos, segundos)
         return "00:00";
     }
 }`,
@@ -50,18 +148,18 @@ double aplicarVariacao(double valorAtual, double delta, double limiteMaximo) {
 {
     public static string FormatarCronometro(int totalSegundos)
     {
-        // Valide se totalSegundos é negativo
-        // Calcule minutos inteiros e segundos restantes (%)
-        // Retorne no formato "MM:SS"
+        // Passo 1: Se totalSegundos < 0, retorne "00:00"
+        // Passo 2: Calcule minutos = totalSegundos / 60 e segundos = totalSegundos % 60
+        // Passo 3: Retorne $"{minutos:D2}:{segundos:D2}"
         return "00:00";
     }
 }`,
     cpp: `#include <string>
 
 std::string formatarCronometro(int totalSegundos) {
-    // Valide se totalSegundos é negativo
-    // Calcule minutos inteiros (/) e segundos restantes (%)
-    // Retorne no formato "MM:SS"
+    // Passo 1: Se totalSegundos < 0, retorne "00:00"
+    // Passo 2: Calcule minutos = totalSegundos / 60 e segundos = totalSegundos % 60
+    // Passo 3: Monte e retorne a string no formato "MM:SS"
     return "00:00";
 }`,
   },
